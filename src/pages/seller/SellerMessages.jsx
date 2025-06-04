@@ -1,3 +1,5 @@
+const global = window;
+
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import Sidebar from "../../components/Sidebar";
 import { useAuthContext } from "../../context/AuthContext";
