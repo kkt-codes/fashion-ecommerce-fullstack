@@ -1,11 +1,15 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import Sidebar from "../../components/Sidebar";
 import { useAuthContext } from "../../context/AuthContext";
+import apiClient from "../../services/api";
+import { invalidateCacheEntry } from "../../hooks/useFetchCached";
 import toast from 'react-hot-toast';
-import { ArrowUpTrayIcon, XCircleIcon, ChartBarIcon, ArchiveBoxIcon, PlusCircleIcon, ChatBubbleLeftEllipsisIcon } from "@heroicons/react/24/outline";
-
-const API_BASE_URL = 'http://localhost:8080/api';
+import { 
+    ArrowUpTrayIcon, 
+    XCircleIcon,
+    ExclamationTriangleIcon
+} from "@heroicons/react/24/outline";
 
 export default function AddProduct() {
   const { currentUser, isLoading: isAuthLoading, userRole } = useAuthContext();
@@ -24,13 +28,6 @@ export default function AddProduct() {
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const sellerLinks = [
-    { label: "Dashboard", path: "/seller/dashboard", icon: ChartBarIcon },
-    { label: "My Products", path: "/seller/products", icon: ArchiveBoxIcon },
-    { label: "Add Product", path: "/seller/add-product", icon: PlusCircleIcon },
-    { label: "Messages", path: "/seller/messages", icon: ChatBubbleLeftEllipsisIcon }
-  ];
-
   const validateField = useCallback((name, value) => {
     let error = "";
     switch (name) {
@@ -43,7 +40,7 @@ export default function AddProduct() {
         else if (value.trim().length < 10) error = "Description must be at least 10 characters.";
         break;
       case "price":
-        if (!value) error = "Price is required.";
+        if (value === null || value === undefined || String(value).trim() === "") error = "Price is required.";
         else if (isNaN(value) || Number(value) <= 0) error = "Price must be a positive number.";
         break;
       case "category":
@@ -71,15 +68,15 @@ export default function AddProduct() {
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      if (file.size > 1 * 1024 * 1024) { // Max 1MB
-        setErrors(prev => ({ ...prev, image: "File is too large (max 1MB)." }));
+      if (file.size > 2 * 1024 * 1024) { // Max 2MB for example
+        setErrors(prev => ({ ...prev, image: "File is too large (max 2MB)." }));
         setSelectedFile(null);
         setImagePreview("");
         e.target.value = null; 
         return;
       }
-      if (!['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.type)) {
-        setErrors(prev => ({ ...prev, image: "Invalid file type (JPEG, PNG, GIF, WEBP)." }));
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+        setErrors(prev => ({ ...prev, image: "Invalid file type (JPEG, PNG, WEBP)." }));
         setSelectedFile(null);
         setImagePreview("");
         e.target.value = null; 
@@ -110,7 +107,7 @@ export default function AddProduct() {
     setSelectedFile(null);
     setImagePreview(""); 
     const fileInput = document.getElementById('imageUpload');
-    if (fileInput) fileInput.value = null;
+    if (fileInput) fileInput.value = null; 
     setErrors(prev => ({ ...prev, image: null }));
   };
 
@@ -120,7 +117,7 @@ export default function AddProduct() {
       const error = validateField(key, formData[key]);
       if (error) newErrors[key] = error;
     });
-    if (!selectedFile) { 
+    if (!selectedFile) { // Image is mandatory for new product
       newErrors.image = "Product image is required.";
     }
     setErrors(newErrors);
@@ -129,7 +126,7 @@ export default function AddProduct() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!currentUser || userRole !== 'Seller') {
+    if (!currentUser || userRole !== 'SELLER') {
       toast.error("You must be signed in as a Seller to add products.");
       return;
     }
@@ -139,67 +136,60 @@ export default function AddProduct() {
     }
 
     setIsSubmitting(true);
-    const loadingToastId = toast.loading("Adding product...");
 
-    // Step 1: Create product with text data
-    const productDataPayload = {
+    // Backend ProductDto for creation expects: name, description, price, category
+    // sellerId will be set by backend based on authenticated user.
+    const productDetailsPayload = {
       name: formData.name.trim(),
       description: formData.description.trim(),
       price: parseFloat(formData.price),
       category: formData.category,
-      sellerId: currentUser.id, // Add sellerId from authenticated user
-      // photoUrl will be set by the backend after image upload
+      // photoUrl will be set after image upload
     };
 
     try {
-      const productResponse = await fetch(`${API_BASE_URL}/products`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          // Session cookie will be sent automatically by the browser for authentication
-        },
-        body: JSON.stringify(productDataPayload),
-      });
+      // Step 1: Create product with text details
+      const productResponse = await apiClient.post('/products', productDetailsPayload);
+      const createdProduct = productResponse.data; // This is ProductDto with id, sellerId, etc.
 
-      if (!productResponse.ok) {
-        const errorData = await productResponse.json().catch(() => ({ message: "Failed to create product details." }));
-        throw new Error(errorData.message || `Product creation failed: ${productResponse.statusText}`);
-      }
-
-      const createdProduct = await productResponse.json(); // This is ProductDto with the new ID
-
-      // Step 2: Upload image for the created product
-      if (selectedFile && createdProduct.id) {
+      if (createdProduct && createdProduct.id && selectedFile) {
+        // Step 2: Upload image for the created product
         const imageFormData = new FormData();
-        imageFormData.append('file', selectedFile); // 'file' should match @RequestParam("file") in backend
+        imageFormData.append('file', selectedFile);
 
-        const imageResponse = await fetch(`${API_BASE_URL}/products/${createdProduct.id}/image`, {
-          method: 'POST',
-          // Content-Type is set automatically by browser for FormData
-          // Session cookie sent automatically
-          body: imageFormData,
+        // The image upload endpoint might return the updated ProductDto with photoUrl
+        await apiClient.post(`/products/${createdProduct.id}/image`, imageFormData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
         });
-
-        if (!imageResponse.ok) {
-          const imgErrorData = await imageResponse.json().catch(() => ({ message: "Failed to upload product image." }));
-          // Product text data was created, but image upload failed.
-          // Potentially inform user or try to delete the product text data.
-          // For now, we'll show an error for image upload.
-          console.error("Image upload failed, product text data was created:", createdProduct);
-          throw new Error(imgErrorData.message || `Image upload failed: ${imageResponse.statusText}`);
-        }
-        // const updatedProductWithImage = await imageResponse.json(); // Backend returns ProductDto with photoUrl
       }
       
-      toast.success("Product added successfully!", { id: loadingToastId });
+      toast.success("Product added successfully!");
+      // Invalidate caches that list products so they refetch
+      invalidateCacheEntry("products"); // A generic key, might need to be more specific if ProductList uses dynamic keys
+      // If SellerProducts page uses a specific key for its own products, invalidate that too.
+      // For example, if SellerProducts uses `products-seller-${currentUser.id}`
+      if (currentUser?.id) {
+        invalidateCacheEntry(`products-/products?sellerId=${currentUser.id}&page=0&size=${PRODUCTS_PER_PAGE}&sort=id,DESC`); // Example key for first page
+      }
+      // Also invalidate general product list caches if they exist and are different
+      // This depends on how `useFetchCached` keys are structured in `ProductList.jsx`
+      // For simplicity, a broad invalidation might be okay, or a more targeted one.
+      // Example: invalidateCacheEntryPrefix('products-'); if you implement such a function.
+
+
       setFormData(initialFormData);
       removeImagePreview();
       setErrors({});
-      navigate("/seller/products");
+      navigate("/seller/products"); // Navigate to seller's product list
 
     } catch (error) {
-      console.error("Error adding product:", error);
-      toast.error(error.message || "Failed to add product. Please try again.", { id: loadingToastId });
+      console.error("Error adding product:", error.response?.data || error.message);
+      const errMsg = error.response?.data?.message || "Failed to add product. Please try again.";
+      toast.error(errMsg);
+      // If product creation failed but image upload was next, consider how to handle.
+      // For now, a general error.
     } finally {
       setIsSubmitting(false);
     }
@@ -215,21 +205,22 @@ export default function AddProduct() {
     );
   }
 
-  if (!currentUser || userRole !== 'Seller') {
+  if (!currentUser || userRole !== 'SELLER') {
     return (
       <div className="flex min-h-screen bg-gray-50">
-        <main className="flex-1 p-6 sm:p-8 flex justify-center items-center">
-          <p className="text-gray-600">Access Denied. Only Sellers can add products.</p>
+        <main className="flex-1 p-6 sm:p-8 flex flex-col justify-center items-center text-center">
+          <ExclamationTriangleIcon className="h-12 w-12 text-red-400 mb-4" />
+          <h2 className="text-xl font-semibold text-gray-700">Access Denied</h2>
+          <p className="text-gray-600">Only Sellers can add products.</p>
         </main>
       </div>
     );
   }
-  
-  const userName = currentUser?.firstname || "Seller";
 
   return (
     <div className="flex min-h-screen bg-gray-50 font-sans">
-      <Sidebar links={sellerLinks} userRole="Seller" userName={userName} />
+      <Sidebar /> {/* Sidebar gets user info from AuthContext */}
+
       <main className="flex-1 p-6 sm:p-8">
         <header className="mb-8">
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">Add New Product</h1>
@@ -237,6 +228,7 @@ export default function AddProduct() {
         </header>
 
         <form onSubmit={handleSubmit} className="bg-white p-6 sm:p-8 rounded-xl shadow-xl space-y-6 max-w-3xl mx-auto">
+          {/* Form fields (name, description, price, category) remain largely the same as your uploaded version */}
           <div>
             <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1.5">Product Name</label>
             <input
@@ -278,6 +270,7 @@ export default function AddProduct() {
                 onChange={handleChange} onBlur={handleBlur}
                 className={`w-full px-4 py-2.5 border rounded-lg shadow-sm focus:outline-none focus:ring-2 sm:text-sm bg-white ${errors.category ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-blue-500 focus:border-blue-500'}`}
               >
+                {/* These categories should ideally come from a dynamic source or match backend enum/table */}
                 <option value="Dress">Dress</option>
                 <option value="Jacket">Jacket</option>
                 <option value="Kids">Kids</option>
@@ -302,19 +295,23 @@ export default function AddProduct() {
                     >
                       <span>Upload a file</span>
                       <input
-                        id="imageUpload" name="imageUpload" type="file" className="sr-only"
+                        id="imageUpload"
+                        name="imageUpload"
+                        type="file"
+                        className="sr-only"
                         onChange={handleImageChange}
-                        accept="image/png, image/jpeg, image/gif, image/webp"
+                        accept="image/png, image/jpeg, image/webp" // Removed GIF as it's less common for product images
                       />
                     </label>
                   </div>
-                  <p className="text-xs text-gray-500">PNG, JPG, GIF, WEBP up to 1MB</p>
+                  <p className="text-xs text-gray-500">PNG, JPG, WEBP up to 2MB</p>
                 </div>
               ) : (
                 <div className="relative group w-full max-w-xs mx-auto">
                   <img src={imagePreview} alt="Product Preview" className="mx-auto h-48 w-auto object-contain rounded-md shadow-md" />
                   <button
-                    type="button" onClick={removeImagePreview}
+                    type="button"
+                    onClick={removeImagePreview}
                     className="absolute -top-3 -right-3 p-1.5 bg-red-600 text-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity duration-300 hover:bg-red-700"
                     aria-label="Remove image"
                   >

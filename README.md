@@ -37,8 +37,8 @@ This project is a responsive and interactive full stack web app for a clothing e
 
 1.  **Clone the repository (Example):**
     ```bash
-    git clone <your-repository-url>
-    cd <your-project-directory>
+    git clone https://github.com/kkt-codes/fashion-ecommerce-fullstack.git
+    cd fashion-ecommerce-fullstack
     ```
 
 2.  **Install dependencies:**

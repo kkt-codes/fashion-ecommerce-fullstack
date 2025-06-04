@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import ProductCard from '../components/ProductCard';
-import toast from 'react-hot-toast';
+import apiClient from '../services/api'; // Import our apiClient
+
 import {
   ArrowRightIcon,
   ShoppingCartIcon,
@@ -13,26 +14,46 @@ import {
   ExclamationTriangleIcon
 } from '@heroicons/react/24/outline';
 
-const API_BASE_URL = 'http://localhost:8080/api';
-
 export default function Home() {
   const [featuredProducts, setFeaturedProducts] = useState([]);
   const [newArrivals, setNewArrivals] = useState([]);
-  
-  const [isLoadingFeatured, setIsLoadingFeatured] = useState(true);
-  const [featuredError, setFeaturedError] = useState(null);
-  const [isLoadingNewArrivals, setIsLoadingNewArrivals] = useState(true);
-  const [newArrivalsError, setNewArrivalsError] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  // Static categories data
+  // Static categories for homepage display (can be fetched if dynamic)
   const categories = [
-    { name: "Dress", image: "/assets/categories/dress.jpg", description: "Elegant & Stylish Dresses" },
-    { name: "Jacket", image: "/assets/categories/jacket.jpg", description: "Warm & Trendy Jackets" },
-    { name: "Kids", image: "/assets/categories/kids.jpg", description: "Fun & Comfy Kids Wear" },
-    { name: "Shirt", image: "/assets/categories/shirt.jpg", description: "Smart & Casual Shirts" },
-    { name: "T-shirt", image: "/assets/categories/tshirt.jpg", description: "Cool & Everyday T-shirts" },
-    { name: "Trouser", image: "/assets/categories/trouser.jpg", description: "Comfortable & Chic Trousers" },
+    { name: "Dress", image: "/assets/categories/dress.jpg", description: "Elegant & Stylish Dresses", path: "/products?category=Dress" },
+    { name: "Jacket", image: "/assets/categories/jacket.jpg", description: "Warm & Trendy Jackets", path: "/products?category=Jacket" },
+    { name: "Kids", image: "/assets/categories/kids.jpg", description: "Fun & Comfy Kids Wear", path: "/products?category=Kids" },
+    { name: "Shirt", image: "/assets/categories/shirt.jpg", description: "Smart & Casual Shirts", path: "/products?category=Shirt" },
+    { name: "T-shirt", image: "/assets/categories/tshirt.jpg", description: "Cool & Everyday T-shirts", path: "/products?category=T-shirt" },
+    { name: "Trouser", image: "/assets/categories/trouser.jpg", description: "Comfortable & Chic Trousers", path: "/products?category=Trouser" },
   ];
+
+  useEffect(() => {
+    const fetchHomeProducts = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        // Fetch featured products (e.g., top 4 rated)
+        // Adjust API endpoint and params as per your backend capabilities
+        const featuredResponse = await apiClient.get('/products?page=0&size=4&sortBy=averageRating&sortDir=DESC');
+        setFeaturedProducts(featuredResponse.data?.content || []);
+
+        // Fetch new arrivals (e.g., latest 4 products by ID or creation date)
+        // Adjust API endpoint and params
+        const newArrivalsResponse = await apiClient.get('/products?page=0&size=4&sortBy=id&sortDir=DESC'); // Assuming higher ID = newer
+        setNewArrivals(newArrivalsResponse.data?.content || []);
+
+      } catch (err) {
+        console.error("Home.jsx: Failed to fetch products for homepage:", err.response?.data || err.message);
+        setError(err.response?.data?.message || err.message || "Could not load products.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchHomeProducts();
+  }, []);
 
   const brandHighlights = [
     { icon: TruckIcon, title: "Fast Shipping", description: "Get your orders delivered swiftly to your doorstep." },
@@ -41,59 +62,8 @@ export default function Home() {
     { icon: ChatBubbleLeftEllipsisIcon, title: "24/7 Support", description: "Our team is here to help you around the clock." }
   ];
 
-  const fetchNewArrivals = useCallback(async () => {
-    setIsLoadingNewArrivals(true);
-    setNewArrivalsError(null);
-    try {
-      // Fetch products sorted by ID descending (proxy for newness)
-      // Adjust sortBy if you have a 'createdAt' field for products
-      const response = await fetch(`${API_BASE_URL}/products?page=0&size=4&sortBy=id&sortDir=DESC`);
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({ message: "Failed to load new arrivals."}));
-        throw new Error(errData.message);
-      }
-      const data = await response.json(); // Page<ProductDto>
-      setNewArrivals(data.content || []);
-    } catch (error) {
-      console.error("Home.jsx: Failed to fetch new arrivals:", error);
-      setNewArrivalsError(error.message);
-      setNewArrivals([]);
-      // toast.error("Could not load new arrivals."); // Optional: can be noisy
-    } finally {
-      setIsLoadingNewArrivals(false);
-    }
-  }, []);
-
-  const fetchFeaturedProducts = useCallback(async () => {
-    setIsLoadingFeatured(true);
-    setFeaturedError(null);
-    try {
-      // Fetch products sorted by averageRating descending
-      const response = await fetch(`${API_BASE_URL}/products?page=0&size=4&sortBy=averageRating&sortDir=DESC&minRating=3`); // e.g. minRating 3
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({ message: "Failed to load featured products."}));
-        throw new Error(errData.message);
-      }
-      const data = await response.json(); // Page<ProductDto>
-      setFeaturedProducts(data.content || []);
-    } catch (error) {
-      console.error("Home.jsx: Failed to fetch featured products:", error);
-      setFeaturedError(error.message);
-      setFeaturedProducts([]);
-      // toast.error("Could not load featured products."); // Optional
-    } finally {
-      setIsLoadingFeatured(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchNewArrivals();
-    fetchFeaturedProducts();
-  }, [fetchNewArrivals, fetchFeaturedProducts]);
-
-
-  const renderProductSection = (title, products, isLoading, error, linkTo, linkText, sectionType) => {
-    if (isLoading) {
+  const renderProductSection = (title, descriptionText, products, linkTo, linkText, sectionType) => {
+    if (isLoading) { // Simplified loading for both sections
       return (
         <div className="text-center py-8">
           <svg className="animate-spin h-8 w-8 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -104,32 +74,28 @@ export default function Home() {
         </div>
       );
     }
-    if (error) {
+    if (error && products.length === 0) { // Show general error if a section couldn't load and is empty
         return (
             <div className="text-center py-8 bg-red-50 p-4 rounded-lg">
                 <ExclamationTriangleIcon className="h-12 w-12 text-red-400 mx-auto mb-2" />
                 <p className="text-red-600 font-semibold">Could not load {title.toLowerCase()}.</p>
                 <p className="text-red-500 text-sm">{error}</p>
-                <button 
-                    onClick={sectionType === 'new-arrivals' ? fetchNewArrivals : fetchFeaturedProducts}
-                    className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm"
-                >
-                    Try Again
-                </button>
             </div>
         );
     }
-    if (!products.length) {
-      return <p className="text-center text-gray-500 py-8">No {title.toLowerCase()} to display at the moment.</p>;
+    if (!products.length && !isLoading) {
+      return <p className="text-center text-gray-500 py-8">{descriptionText}</p>;
     }
 
     return (
       <>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8">
-          {products.map((product) => ( // product is ProductDto
-            <ProductCard key={product.id} product={product} />
-          ))}
-        </div>
+        {products.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8">
+            {products.map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        )}
         <div className="text-center mt-10 sm:mt-12">
           <Link
             to={linkTo}
@@ -141,7 +107,6 @@ export default function Home() {
       </>
     );
   };
-
 
   return (
     <div className="bg-gray-50 min-h-screen">
@@ -176,7 +141,7 @@ export default function Home() {
             {categories.map((category) => (
               <Link
                 key={category.name}
-                to={`/products?category=${encodeURIComponent(category.name)}`}
+                to={category.path} // Use path from category object
                 className="relative group block aspect-square sm:aspect-[4/5] overflow-hidden rounded-xl shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1"
               >
                 <img 
@@ -202,10 +167,9 @@ export default function Home() {
           </div>
           {renderProductSection(
             "New Arrivals", 
+            "No new items to show right now, check back soon!", 
             newArrivals, 
-            isLoadingNewArrivals,
-            newArrivalsError,
-            "/products?sortBy=id&sortDir=DESC", // Link to all new products
+            "/products?sortBy=id&sortDir=DESC", // Link to all products sorted by newness
             "View All New Products",
             "new-arrivals"
           )}
@@ -221,10 +185,9 @@ export default function Home() {
           </div>
           {renderProductSection(
             "Featured Products",
+            "No featured products available at the moment.",
             featuredProducts,
-            isLoadingFeatured,
-            featuredError,
-            "/products?sortBy=averageRating&sortDir=DESC", // Link to top-rated products
+            "/products?sortBy=averageRating&sortDir=DESC", // Link to all products sorted by rating
             "Explore All Products",
             "featured"
           )}

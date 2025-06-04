@@ -1,7 +1,3 @@
-// Context Based
-
-// /hooks/useSignupSigninModal.js
-
 import { createContext, useContext, useState } from "react";
 
 // Create the context

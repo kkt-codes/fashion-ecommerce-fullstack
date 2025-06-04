@@ -1,71 +1,64 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import Sidebar from "../../components/Sidebar";
 import { useAuthContext } from "../../context/AuthContext";
+import apiClient from "../../services/api";
 import toast from 'react-hot-toast';
 import {
   ChatBubbleLeftEllipsisIcon, PaperAirplaneIcon, ArrowLeftIcon,
-  UserCircleIcon, ListBulletIcon, ChartBarIcon, HeartIcon, InboxIcon, UserGroupIcon
+  InboxIcon // For empty states
 } from "@heroicons/react/24/outline";
 import { formatDistanceToNowStrict, parseISO, isToday, format } from 'date-fns';
 import { useLocation, useNavigate } from 'react-router-dom';
-
-// StompJS and SockJS for WebSocket (optional, for real-time updates)
-// import { Client } from '@stomp/stompjs';
-// import SockJS from 'sockjs-client';
-
-const API_BASE_URL = 'http://localhost:8080/api'; 
-// const WEBSOCKET_URL = 'http://localhost:8080/ws'; // WebSocket endpoint
-
-const buyerLinks = [
-  { label: "Dashboard", path: "/buyer/dashboard", icon: ChartBarIcon },
-  { label: "My Orders", path: "/buyer/orders", icon: ListBulletIcon },
-  { label: "Messages", path: "/buyer/messages", icon: ChatBubbleLeftEllipsisIcon },
-  { label: "My Profile", path: "/buyer/profile", icon: UserCircleIcon },
-  { label: "My Favorites", path: "/buyer/favorites", icon: HeartIcon },
-];
+import Stomp from 'stompjs'; // For WebSocket STOMP client
+import SockJS from 'sockjs-client'; // For SockJS WebSocket fallback
 
 // Helper to format timestamp
-const formatMessageTimestamp = (isoString) => {
-  if (!isoString) return '';
-  const date = parseISO(isoString);
+const formatMessageTimestamp = (isoTimestamp) => {
+  if (!isoTimestamp) return '';
+  const date = parseISO(isoTimestamp);
   if (isToday(date)) {
     return format(date, 'p'); // e.g., 2:30 PM
   }
-  return format(date, 'MMM d, p'); // e.g., May 30, 2:30 PM
+  return format(date, 'MMM d, p'); // e.g., Jun 3, 2:30 PM
 };
 
 
 const ConversationListItem = ({ conversation, onSelectConversation, isActive, currentUserId }) => {
-  // Backend ConversationDto: id, user1Id, user2Id, startedAt
-  // We need to determine the 'other' participant.
-  const otherParticipantId = conversation.user1Id === currentUserId ? conversation.user2Id : conversation.user1Id;
-  // For now, we'll display the ID. Fetching names would require another API call or modified DTO.
-  const otherParticipantName = `User ${otherParticipantId.substring(0, 8)}...`; 
+  // Backend ConversationDto: id, user1Id, user2Id, user1Name, user2Name, lastMessage, lastMessageTimestamp, unreadMessagesCountForUser1, unreadMessagesCountForUser2
+  const otherParticipant = currentUser?.id === conversation.user1Id 
+    ? { id: conversation.user2Id, name: conversation.user2Name || "User " + conversation.user2Id?.slice(-4) } 
+    : { id: conversation.user1Id, name: conversation.user1Name || "User " + conversation.user1Id?.slice(-4) };
   
-  // lastMessageText, lastMessageTimestamp, isUnread, unreadMessagesCount are not directly in ConversationDto.
-  // These would need to be derived or added to the DTO by the backend.
-  // For now, we'll use placeholders or omit.
-  const lastMessageText = conversation.lastMessage?.content || "No messages yet";
-  const lastMessageTimestamp = conversation.lastMessage?.sentAt;
-  const isUnread = conversation.unreadCount > 0; // Assuming backend adds unreadCount
+  const lastMessageText = conversation.lastMessage || "No messages yet...";
+  const lastMessageTimestamp = conversation.lastMessageTimestamp;
+  
+  // Determine unread status based on who the current user is in the conversation
+  let unreadMessagesCount = 0;
+  if (currentUser?.id === conversation.user1Id) {
+    unreadMessagesCount = conversation.unreadMessagesCountForUser1 || 0;
+  } else if (currentUser?.id === conversation.user2Id) {
+    unreadMessagesCount = conversation.unreadMessagesCountForUser2 || 0;
+  }
+  const isUnread = unreadMessagesCount > 0;
 
   return (
     <button
-      onClick={() => onSelectConversation(conversation.id, otherParticipantName, otherParticipantId)}
+      onClick={() => onSelectConversation(conversation.id)}
       className={`w-full text-left p-3 hover:bg-gray-100 rounded-lg transition-colors duration-150 flex items-start space-x-3
         ${isActive ? 'bg-blue-50 shadow-sm' : ''}
-        ${isUnread ? 'font-semibold text-gray-800' : 'text-gray-600'}`}
+        ${isUnread ? 'font-semibold' : ''}`}
     >
-      <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-500 text-sm">
-        <UserGroupIcon className="h-5 w-5"/>
+      <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-500 text-sm overflow-hidden">
+        {/* Basic initial for avatar fallback */}
+        {otherParticipant.name?.charAt(0).toUpperCase() || '?'}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex justify-between items-center">
-          <p className={`truncate text-sm ${isUnread ? 'text-blue-600' : 'text-gray-800'}`}>
-            {otherParticipantName}
+          <p className={`truncate text-sm ${isUnread ? 'text-blue-600 font-bold' : 'text-gray-800'}`}>
+            {otherParticipant.name}
           </p>
           {lastMessageTimestamp && (
-            <p className={`text-xs whitespace-nowrap ${isUnread ? 'text-blue-500' : 'text-gray-400'}`}>
+            <p className={`text-xs whitespace-nowrap ${isUnread ? 'text-blue-500 font-medium' : 'text-gray-400'}`}>
               {formatMessageTimestamp(lastMessageTimestamp)}
             </p>
           )}
@@ -74,9 +67,9 @@ const ConversationListItem = ({ conversation, onSelectConversation, isActive, cu
           <p className={`truncate text-xs ${isUnread ? 'text-gray-700' : 'text-gray-500'}`}>
             {lastMessageText}
           </p>
-          {isUnread && conversation.unreadCount > 0 && (
+          {isUnread && unreadMessagesCount > 0 && (
             <span className="ml-2 px-2 py-0.5 text-xs font-bold text-white bg-red-500 rounded-full">
-              {conversation.unreadCount}
+              {unreadMessagesCount}
             </span>
           )}
         </div>
@@ -86,10 +79,9 @@ const ConversationListItem = ({ conversation, onSelectConversation, isActive, cu
 };
 
 const ChatMessageBubble = ({ message, currentUserId }) => {
-  // Backend MessageDto: id, conversationId, senderId, encryptedContent, sentAt, read
+  // Backend MessageDto: id, conversationId, senderId, senderName, content (was encryptedContent), sentAt, isRead
   const isCurrentUserSender = message.senderId === currentUserId;
-  // Again, senderName would require fetching user details or modifying DTO.
-  const senderName = isCurrentUserSender ? "You" : `User ${message.senderId.substring(0,8)}...`;
+  const senderName = message.senderName || 'Unknown';
 
   return (
     <div className={`flex mb-3 ${isCurrentUserSender ? 'justify-end' : 'justify-start'}`}>
@@ -101,9 +93,9 @@ const ChatMessageBubble = ({ message, currentUserId }) => {
         {!isCurrentUserSender && (
           <p className="text-xs font-semibold mb-0.5 text-gray-600">{senderName}</p>
         )}
-        <p className="text-sm whitespace-pre-wrap break-words">{message.encryptedContent}</p> {/* Assuming content is decrypted or for display */}
+        <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p> {/* Use content */}
         <p className={`text-xs mt-1.5 opacity-80 text-right ${isCurrentUserSender ? 'text-blue-100' : 'text-gray-500'}`}>
-          {formatMessageTimestamp(message.sentAt)}
+          {message.sentAt ? formatMessageTimestamp(message.sentAt) : 'sending...'}
         </p>
       </div>
     </div>
@@ -111,23 +103,23 @@ const ChatMessageBubble = ({ message, currentUserId }) => {
 };
 
 
-export default function BuyerMessages() {
+export default function BuyerMessagesPage() { // Renamed for clarity
   const { currentUser, isAuthenticated, userRole, isLoading: isAuthLoading } = useAuthContext();
   const location = useLocation();
   const navigate = useNavigate();
-  const messagesEndRef = useRef(null); // For auto-scrolling
 
   const [conversations, setConversations] = useState([]);
   const [selectedConversationId, setSelectedConversationId] = useState(null);
   const [selectedConversationMessages, setSelectedConversationMessages] = useState([]);
-  const [selectedConversationPartner, setSelectedConversationPartner] = useState({ name: '', id: '' });
-  
   const [newMessage, setNewMessage] = useState("");
+  
   const [isLoadingConversations, setIsLoadingConversations] = useState(true);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSending, setIsSending] = useState(false);
 
-  // const stompClientRef = useRef(null); // For WebSocket client
+  const stompClientRef = useRef(null);
+  const subscriptionsRef = useRef({}); // To store STOMP subscriptions
+  const messagesEndRef = useRef(null); // To scroll to bottom of messages
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -136,161 +128,232 @@ export default function BuyerMessages() {
   useEffect(scrollToBottom, [selectedConversationMessages]);
 
 
-  // Fetch all conversations for the current buyer
-  const loadConversations = useCallback(async (selectConvoId = null, productContext = null) => {
-    if (!currentUser?.id || userRole !== 'Buyer') {
+  const loadConversations = useCallback(async (selectConvId = null) => {
+    if (!currentUser || userRole !== 'BUYER') {
       setConversations([]);
       setIsLoadingConversations(false);
       return;
     }
     setIsLoadingConversations(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/chat/user/${currentUser.id}/conversations`);
-      if (!response.ok) throw new Error("Failed to load conversations.");
-      let fetchedConversations = await response.json(); // List<ConversationDto>
-      
-      // Enhance conversations with last message and unread count (client-side for now)
-      // Ideally, backend DTO would include this.
-      fetchedConversations = await Promise.all(fetchedConversations.map(async (convo) => {
-        const messagesResponse = await fetch(`${API_BASE_URL}/chat/conversation/${convo.id}/messages`);
-        let lastMsg = null;
-        let unread = 0;
-        if(messagesResponse.ok) {
-          const msgs = await messagesResponse.json();
-          if (msgs.length > 0) {
-            lastMsg = msgs[msgs.length - 1]; // Assuming sorted by date
-            // Calculate unread (simplified, backend should ideally provide this)
-            unread = msgs.filter(m => m.senderId !== currentUser.id && !m.read).length;
-          }
-        }
-        return {...convo, lastMessage: lastMsg, unreadCount: unread};
-      }));
-      
-      // Sort by last message timestamp (descending)
-      fetchedConversations.sort((a, b) => {
-        const dateA = a.lastMessage ? parseISO(a.lastMessage.sentAt) : new Date(0);
-        const dateB = b.lastMessage ? parseISO(b.lastMessage.sentAt) : new Date(0);
-        return dateB - dateA;
-      });
-
+      // Backend: GET /api/chat/user/me/conversations or /api/chat/user/{userId}/conversations
+      const response = await apiClient.get(`/chat/user/${currentUser.id}/conversations`);
+      const fetchedConversations = response.data || []; // Expects List<ConversationDto>
       setConversations(fetchedConversations);
 
-      if (selectConvoId) {
-        const convoToSelect = fetchedConversations.find(c => c.id === selectConvoId);
-        if (convoToSelect) {
-            const partnerId = convoToSelect.user1Id === currentUser.id ? convoToSelect.user2Id : convoToSelect.user1Id;
-            handleSelectConversation(selectConvoId, `User ${partnerId.substring(0,8)}...`, partnerId);
-             if (productContext?.name) {
-                setNewMessage(`Regarding your product: ${productContext.name}\n\n`);
-             }
-        }
+      if (selectConvId && fetchedConversations.some(c => c.id === selectConvId)) {
+        setSelectedConversationId(selectConvId);
+      } else if (fetchedConversations.length > 0 && !selectedConversationId) {
+        // Optionally auto-select the first conversation if none is selected
+        // setSelectedConversationId(fetchedConversations[0].id);
       }
 
     } catch (error) {
-      console.error("BuyerMessages: Error loading conversations:", error);
+      console.error("Error fetching conversations:", error.response?.data || error.message);
       toast.error("Could not load your conversations.");
     } finally {
       setIsLoadingConversations(false);
     }
-  }, [currentUser, userRole]);
+  }, [currentUser, userRole, selectedConversationId]); // Added selectedConversationId
 
-  // Fetch messages for a selected conversation
-  const fetchMessagesForConversation = useCallback(async (conversationId) => {
-    if (!conversationId || !currentUser?.id) return;
-    setIsLoadingMessages(true);
-    try {
-      const response = await fetch(`${API_BASE_URL}/chat/conversation/${conversationId}/messages`);
-      if (!response.ok) throw new Error("Failed to load messages.");
-      const messages = await response.json(); // List<MessageDto>
-      setSelectedConversationMessages(messages.sort((a,b) => parseISO(a.sentAt) - parseISO(b.sentAt))); // Sort ascending
-
-      // Mark messages as read
-      await fetch(`${API_BASE_URL}/chat/conversation/${conversationId}/mark-read/${currentUser.id}`, { method: 'POST' });
-      // Optimistically update unread count in conversation list or re-fetch conversations
-      setConversations(prev => prev.map(c => c.id === conversationId ? {...c, unreadCount: 0} : c));
-
-    } catch (error) {
-      console.error("BuyerMessages: Error loading messages:", error);
-      toast.error("Could not load messages for this conversation.");
-    } finally {
-      setIsLoadingMessages(false);
-    }
-  }, [currentUser]);
-
-  // Handle initial conversation opening from navigation state (e.g., from ContactSellerButton)
+  // Effect to handle initial conversation opening from navigation state (e.g., from ContactSellerButton)
   useEffect(() => {
-    if (isAuthLoading || !currentUser?.id) return;
+    if (isAuthLoading || !currentUser) return;
 
     const navigationState = location.state;
-    if (navigationState && navigationState.openWithSellerId && currentUser?.id) {
-      const { openWithSellerId, sellerName, productContext } = navigationState;
-      // console.log("BuyerMessages: Attempting to start/get conversation with seller:", openWithSellerId);
+
+    if (navigationState && navigationState.openWithSellerId) {
+      const { openWithSellerId, productContext } = navigationState;
+      console.log("BuyerMessages: Attempting to start/get conversation with seller:", openWithSellerId);
       
-      setIsLoadingConversations(true); // Show loading while starting/getting convo
-      fetch(`${API_BASE_URL}/chat/start?user1Id=${currentUser.id}&user2Id=${openWithSellerId}`, { method: 'POST' })
-        .then(response => {
-          if (!response.ok) throw new Error("Failed to start or get conversation.");
-          return response.json(); // Expects ConversationDto
-        })
-        .then(conversationData => {
-          // console.log("BuyerMessages: Conversation started/retrieved:", conversationData);
-          // Load all conversations, then select the target one and prefill message
-          loadConversations(conversationData.id, productContext);
-        })
-        .catch(error => {
-          console.error("BuyerMessages: Error starting/getting conversation:", error);
-          toast.error("Could not initiate chat with seller.");
-          loadConversations(); // Load conversations normally on error
-        })
-        .finally(() => {
-            // Clear the state from location to prevent re-triggering
-            navigate(location.pathname, { replace: true, state: {} });
-        });
+      const startChat = async () => {
+        setIsLoadingConversations(true);
+        try {
+          // Backend: POST /api/chat/start?user1Id={buyerId}&user2Id={sellerId}
+          const response = await apiClient.post(`/chat/start?user1Id=${currentUser.id}&user2Id=${openWithSellerId}`);
+          const conversation = response.data; // Expects ConversationDto
+          if (conversation && conversation.id) {
+            await loadConversations(conversation.id); // Load all conversations and select this one
+            if (productContext?.name) {
+              setNewMessage(`Regarding your product: ${productContext.name}\n\n`);
+            }
+          } else {
+            toast.error("Could not start or find the chat.");
+          }
+        } catch (error) {
+          console.error("Error starting chat:", error.response?.data || error.message);
+          toast.error(error.response?.data?.message || "Failed to initiate chat.");
+          loadConversations(); // Load existing conversations even if start fails
+        } finally {
+          setIsLoadingConversations(false);
+          // Clear the state from location to prevent re-triggering
+          navigate(location.pathname, { replace: true, state: {} });
+        }
+      };
+      startChat();
     } else {
-      loadConversations(); // Normal load
+      loadConversations(); // Normal load if no specific conversation is to be opened
     }
-  }, [isAuthLoading, currentUser, location.state, navigate, loadConversations]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthLoading, currentUser, location.state, navigate]); // loadConversations is stable
+
+  // Effect to fetch messages when a conversation is selected
+  useEffect(() => {
+    if (selectedConversationId && currentUser) {
+      const fetchMessages = async () => {
+        setIsLoadingMessages(true);
+        try {
+          // Backend: GET /api/chat/conversation/{conversationId}/messages
+          const response = await apiClient.get(`/chat/conversation/${selectedConversationId}/messages`);
+          setSelectedConversationMessages(response.data || []); // Expects List<MessageDto>
+          
+          // Mark messages as read (optional, could be a separate action)
+          // await apiClient.post(`/chat/conversation/${selectedConversationId}/mark-read/${currentUser.id}`);
+          // loadConversations(); // Refresh conversation list for unread counts
+        } catch (error) {
+          console.error(`Error fetching messages for conversation ${selectedConversationId}:`, error.response?.data || error.message);
+          toast.error("Could not load messages for this conversation.");
+        } finally {
+          setIsLoadingMessages(false);
+        }
+      };
+      fetchMessages();
+    } else {
+      setSelectedConversationMessages([]); // Clear messages if no conversation selected
+    }
+  }, [selectedConversationId, currentUser, loadConversations]);
 
 
-  const handleSelectConversation = useCallback((conversationId, partnerName, partnerId) => {
+  // WebSocket/STOMP Setup
+  useEffect(() => {
+    if (!currentUser || !isAuthenticated) {
+      if (stompClientRef.current && stompClientRef.current.connected) {
+        stompClientRef.current.disconnect(() => console.log("STOMP: Disconnected due to user logout/auth change."));
+        stompClientRef.current = null;
+        subscriptionsRef.current = {};
+      }
+      return;
+    }
+
+    const token = localStorage.getItem('appAuthToken'); // Token for WebSocket connection
+
+    // Ensure previous client is disconnected before creating a new one
+    if (stompClientRef.current && stompClientRef.current.connected) {
+        console.log("STOMP: Already connected or attempting to reconnect, skipping new connection setup for now.");
+        // return; // Or disconnect and reconnect:
+        // stompClientRef.current.disconnect(() => { /* then setup new connection */ });
+    }
+    
+    // Only proceed if not already connected (or after explicit disconnect)
+    if (!stompClientRef.current || !stompClientRef.current.connected) {
+        const socket = new SockJS('http://localhost:8080/ws'); // Your backend WebSocket endpoint
+        const stompClient = Stomp.over(socket);
+        stompClientRef.current = stompClient;
+
+        // STOMP Connect Headers (can include JWT for STOMP-level auth if backend configured for it)
+        const connectHeaders = {
+            // 'Authorization': `Bearer ${token}` // If your WebSocketConfig/ChannelInterceptor handles this
+        };
+
+        stompClient.connect(connectHeaders, 
+            (frame) => { // On Connect
+                console.log('STOMP: Connected: ' + frame);
+                
+                // Subscribe to a general topic for now, as per backend's current broadcast
+                // Ideally, subscribe to user-specific or conversation-specific topics
+                const generalSub = stompClient.subscribe('/topic/messages', (message) => {
+                    const receivedMessage = JSON.parse(message.body); // ChatMessageDto from backend
+                    console.log("STOMP: Received general message:", receivedMessage);
+                    // If this message belongs to the currently selected conversation, add it
+                    if (receivedMessage.conversationId === selectedConversationId) {
+                        setSelectedConversationMessages(prevMessages => [...prevMessages, receivedMessage]);
+                        // Also update conversation list with last message preview (more complex)
+                        // loadConversations(); // This might be too heavy, better to update specific convo
+                        setConversations(prevConvos => prevConvos.map(c => 
+                            c.id === receivedMessage.conversationId 
+                            ? {...c, lastMessage: receivedMessage.content, lastMessageTimestamp: receivedMessage.sentAt } 
+                            : c
+                        ));
+
+                    }
+                });
+                subscriptionsRef.current['general'] = generalSub;
+
+                // Example for user-specific queue (if backend supports it)
+                // const userQueueSub = stompClient.subscribe(`/user/${currentUser.id}/queue/private-messages`, (message) => { ... });
+                // subscriptionsRef.current['userQueue'] = userQueueSub;
+
+            }, 
+            (error) => { // On Error
+                console.error('STOMP: Connection error: ' + error);
+                toast.error("Real-time chat connection failed.");
+                 // Implement reconnection logic if desired
+            }
+        );
+        // Optional: Configure STOMP client (heartbeat, debug)
+        // stompClient.debug = (str) => { console.log("STOMP_DEBUG:", str); };
+    }
+
+    return () => { // Cleanup on component unmount or user change
+      if (stompClientRef.current && stompClientRef.current.connected) {
+        console.log("STOMP: Disconnecting on component unmount/user change...");
+        // Unsubscribe from all known subscriptions
+        Object.values(subscriptionsRef.current).forEach(sub => sub.unsubscribe());
+        subscriptionsRef.current = {};
+        stompClientRef.current.disconnect(() => {
+          console.log('STOMP: Disconnected.');
+        });
+        stompClientRef.current = null;
+      }
+    };
+  }, [currentUser, isAuthenticated, selectedConversationId]); // Re-run if user or selectedConversationId changes for subscriptions
+
+
+  const handleSelectConversation = useCallback((conversationId) => {
     setSelectedConversationId(conversationId);
-    setSelectedConversationPartner({ name: partnerName, id: partnerId});
-    fetchMessagesForConversation(conversationId);
-  }, [fetchMessagesForConversation]);
+    // Optionally mark messages as read on the backend when a conversation is selected
+    // apiClient.post(`/chat/conversation/${conversationId}/mark-read/${currentUser.id}`).catch(e => console.error("Failed to mark as read", e));
+  }, [currentUser]);
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!newMessage.trim() || !selectedConversationId || !currentUser?.id || isSending) return;
+    if (!newMessage.trim() || !selectedConversationId || !currentUser || isSending) return;
 
     setIsSending(true);
-    try {
-      // Message content is sent as plain text in the request body for ChatController
-      const response = await fetch(`${API_BASE_URL}/chat/message?conversationId=${selectedConversationId}&senderId=${currentUser.id}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' }, // As per ChatController
-        body: newMessage.trim(),
-      });
-      if (!response.ok) throw new Error("Failed to send message.");
-      
-      // const sentMessage = await response.json(); // MessageDto
-      // Optimistically add message or re-fetch
-      setNewMessage("");
-      fetchMessagesForConversation(selectedConversationId); // Re-fetch messages
-      // Potentially update last message in conversations list (or re-fetch all conversations)
-      // For simplicity, full re-fetch of messages for selected convo is done.
-      // A more optimized approach would be to update conversations list locally or via WebSocket.
-      const currentConvoIndex = conversations.findIndex(c => c.id === selectedConversationId);
-      if (currentConvoIndex !== -1) {
-          const updatedConvos = [...conversations];
-          // To update last message, we'd need the new message content and timestamp
-          // This is better handled by backend providing updated conversation list or WebSocket
-          // For now, we just re-sort to bring active convo to top if backend doesn't sort by recent activity
-          // Or call loadConversations() again after a short delay if necessary.
-      }
+    const messagePayload = {
+      conversationId: selectedConversationId,
+      senderId: currentUser.id,
+      content: newMessage.trim(), // Assuming backend expects 'content'
+      // timestamp will be set by backend
+    };
 
+    try {
+      // Option 1: Send via STOMP WebSocket
+      if (stompClientRef.current && stompClientRef.current.connected) {
+        stompClientRef.current.send("/app/chat.sendMessage", {}, JSON.stringify(messagePayload));
+        // Optimistically add to UI, or wait for broadcast.
+        // If waiting for broadcast, ensure sentAt is handled correctly for local display.
+        // For now, we rely on the broadcast to update selectedConversationMessages.
+        // To make it appear instantly:
+        // const optimisticMessage = { ...messagePayload, sentAt: new Date().toISOString(), senderName: currentUser.firstName, id: Date.now() }; // temp id
+        // setSelectedConversationMessages(prev => [...prev, optimisticMessage]);
+
+        console.log("STOMP: Sent message via WebSocket", messagePayload);
+      } else {
+        // Option 2: Fallback to REST API if WebSocket not connected (or as primary if no WS)
+        // Backend: POST /api/chat/message expects conversationId, senderId, encryptedContent (use content)
+        const response = await apiClient.post('/chat/message', messagePayload);
+        const sentMessage = response.data; // Expects MessageDto
+        setSelectedConversationMessages(prevMessages => [...prevMessages, sentMessage]);
+        // Refresh conversation list to update last message preview
+        loadConversations(selectedConversationId);
+        console.log("REST: Sent message via API", sentMessage);
+      }
+      setNewMessage("");
     } catch (error) {
-      console.error("BuyerMessages: Error sending message:", error);
-      toast.error("Failed to send message.");
+      console.error("Error sending message:", error.response?.data || error.message);
+      toast.error(error.response?.data?.message || "Failed to send message.");
+      // If optimistic update was done, might need to revert it here.
     } finally {
       setIsSending(false);
     }
@@ -299,71 +362,36 @@ export default function BuyerMessages() {
   const handleBackToList = () => {
     setSelectedConversationId(null);
     setSelectedConversationMessages([]);
-    setSelectedConversationPartner({ name: '', id: '' });
-    // Optionally refresh conversations list if unread counts might have changed
-    // loadConversations(); 
+    // loadConversations(); // Optionally refresh list when going back
   };
 
-  // Placeholder for WebSocket setup (if implementing real-time)
-  // useEffect(() => {
-  //   if (isAuthenticated && currentUser?.id && !stompClientRef.current) {
-  //     const socket = new SockJS(WEBSOCKET_URL);
-  //     const client = new Client({
-  //       webSocketFactory: () => socket,
-  //       debug: (str) => console.log('STOMP: ' + str),
-  //       reconnectDelay: 5000,
-  //       onConnect: () => {
-  //         console.log('STOMP: Connected');
-  //         // Subscribe to general messages or specific conversation topics
-  //         client.subscribe(`/topic/messages`, (message) => {
-  //           const receivedMsg = JSON.parse(message.body); // Assuming ChatMessageDto
-  //           console.log("WebSocket message received:", receivedMsg);
-  //           // If this message belongs to the currently selected conversation, update messages
-  //           if (receivedMsg.conversationId === selectedConversationId) {
-  //             setSelectedConversationMessages(prev => [...prev, {
-  //               id: Date.now(), // temp ID or use one from message
-  //               conversationId: receivedMsg.conversationId,
-  //               senderId: receivedMsg.senderId,
-  //               encryptedContent: receivedMsg.content,
-  //               sentAt: receivedMsg.timestamp || new Date().toISOString(),
-  //               read: false,
-  //             }].sort((a,b) => parseISO(a.sentAt) - parseISO(b.sentAt)));
-  //           }
-  //           // Update conversation list (last message, unread count)
-  //           // This part can be complex and might require re-fetching conversations or smart updates.
-  //           loadConversations(); // Simple re-fetch for now
-  //         });
-  //       },
-  //       onStompError: (frame) => console.error('STOMP: Broker reported error: ' + frame.headers['message'], frame.body),
-  //     });
-  //     client.activate();
-  //     stompClientRef.current = client;
-  //   }
-  //   return () => {
-  //     if (stompClientRef.current?.active) {
-  //       stompClientRef.current.deactivate();
-  //       stompClientRef.current = null;
-  //       console.log('STOMP: Disconnected');
-  //     }
-  //   };
-  // }, [isAuthenticated, currentUser, selectedConversationId, loadConversations]);
+  const selectedConversationDetails = useMemo(() => {
+    return conversations.find(c => c.id === selectedConversationId);
+  }, [conversations, selectedConversationId]);
+
+  const otherParticipantNameInSelected = useMemo(() => {
+    if (!selectedConversationDetails || !currentUser) return "Conversation";
+    return currentUser.id === selectedConversationDetails.user1Id 
+        ? selectedConversationDetails.user2Name 
+        : selectedConversationDetails.user1Name;
+  }, [selectedConversationDetails, currentUser]);
 
 
-  if (isAuthLoading) {
+  if (isAuthLoading) { // Overall auth loading
     return (
       <div className="flex h-screen bg-gray-100">
-        <Sidebar links={buyerLinks} userRole="Buyer" userName={currentUser?.firstname || "User"} />
+        <Sidebar />
         <main className="flex-1 p-6 flex justify-center items-center">
-          <p className="text-gray-500 animate-pulse text-lg">Loading Your Messages...</p>
+          <p className="text-gray-500 animate-pulse text-lg">Loading Messages...</p>
         </main>
       </div>
     );
   }
 
-  if (!isAuthenticated || userRole !== 'Buyer') {
+  if (!isAuthenticated || userRole !== 'BUYER') {
      return (
       <div className="flex h-screen bg-gray-100">
-        <Sidebar links={buyerLinks} userRole="Buyer" />
+        <Sidebar />
         <main className="flex-1 p-6 flex flex-col justify-center items-center text-center">
             <ChatBubbleLeftEllipsisIcon className="h-16 w-16 text-gray-300 mb-4" />
             <h2 className="text-xl font-semibold text-gray-700 mb-2">Access Denied</h2>
@@ -375,10 +403,10 @@ export default function BuyerMessages() {
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
-      <Sidebar links={buyerLinks} userRole="Buyer" userName={currentUser?.firstname || "User"} />
+      <Sidebar />
       
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-        {/* Conversations List Panel */}
+        {/* Conversation List Pane */}
         <div className={`
           ${selectedConversationId && 'hidden md:flex'} md:flex-col 
           w-full md:w-2/5 lg:w-1/3 xl:w-1/4 
@@ -387,66 +415,63 @@ export default function BuyerMessages() {
         `}>
           <div className="p-4 border-b border-gray-200">
             <h2 className="text-xl font-semibold text-gray-800">Messages</h2>
+            {/* Add search/filter for conversations if needed */}
           </div>
           <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
-            {isLoadingConversations ? (
-              <p className="p-4 text-gray-400 text-center">Loading conversations...</p>
-            ) : conversations.length > 0 ? (
+            {isLoadingConversations && conversations.length === 0 && <p className="p-4 text-gray-400 text-center">Loading conversations...</p>}
+            {!isLoadingConversations && conversations.length > 0 ? (
               conversations.map(convo => (
                 <ConversationListItem 
                   key={convo.id} 
                   conversation={convo} 
                   onSelectConversation={handleSelectConversation}
                   isActive={selectedConversationId === convo.id}
-                  currentUserId={currentUser.id}
+                  currentUserId={currentUser?.id}
                 />
               ))
             ) : (
-              <div className="p-4 text-center text-gray-500">
-                <InboxIcon className="h-12 w-12 mx-auto text-gray-300 mb-2" />
-                No conversations yet.
-              </div>
+              !isLoadingConversations && (
+                <div className="p-4 text-center text-gray-500 mt-10">
+                  <InboxIcon className="h-12 w-12 mx-auto text-gray-300 mb-2" />
+                  No conversations yet.
+                </div>
+              )
             )}
           </div>
         </div>
 
-        {/* Selected Conversation Panel */}
+        {/* Message View Pane */}
         <div className={`
           ${!selectedConversationId && 'hidden md:flex'} md:flex-col 
           w-full md:w-3/5 lg:w-2/3 xl:w-3/4 
           bg-gray-50 flex flex-col
         `}>
-          {selectedConversationId ? (
+          {selectedConversationId && selectedConversationDetails ? (
             <>
               <div className="p-3 sm:p-4 border-b border-gray-200 bg-white flex items-center space-x-3 shadow-sm">
                 <button onClick={handleBackToList} className="md:hidden p-2 rounded-full hover:bg-gray-100 text-gray-600">
                   <ArrowLeftIcon className="h-5 w-5" />
                 </button>
-                <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-500 text-sm">
-                  <UserGroupIcon className="h-5 w-5"/>
+                <div className="flex-shrink-0 h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-500 text-sm overflow-hidden">
+                  {otherParticipantNameInSelected?.charAt(0).toUpperCase() || '?'}
                 </div>
                 <div>
-                    <h3 className="text-md font-semibold text-gray-800">{selectedConversationPartner.name || "Conversation"}</h3>
-                    {/* <p className="text-xs text-green-500">Online</p> */}
+                    <h3 className="text-md font-semibold text-gray-800">{otherParticipantNameInSelected}</h3>
+                    {/* Could add online status here if available */}
                 </div>
               </div>
 
               <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
-                {isLoadingMessages ? (
-                  <p className="text-center text-gray-400 py-10">Loading messages...</p>
-                ) : selectedConversationMessages.length > 0 ? (
-                  selectedConversationMessages.map(msg => (
-                    <ChatMessageBubble 
-                      key={msg.id} 
-                      message={msg} 
-                      currentUserId={currentUser.id}
-                    />
-                  ))
-                ) : (
-                  <p className="text-center text-gray-400 py-10">No messages in this conversation yet.</p>
-                )}
-                <div ref={messagesEndRef} />
-                 {isSending && <p className="text-xs text-gray-400 italic text-center my-2">Sending...</p>}
+                {isLoadingMessages && <p className="text-center text-gray-500">Loading messages...</p>}
+                {!isLoadingMessages && selectedConversationMessages.map(msg => (
+                  <ChatMessageBubble 
+                    key={msg.id || `msg-${Math.random()}`} // Use msg.id from backend
+                    message={msg} 
+                    currentUserId={currentUser.id}
+                  />
+                ))}
+                <div ref={messagesEndRef} /> {/* For scrolling to bottom */}
+                 {isSending && <p className="text-xs text-gray-400 italic text-right my-1 pr-2">Sending...</p>}
               </div>
 
               <div className="p-3 sm:p-4 border-t border-gray-200 bg-white">
@@ -474,7 +499,7 @@ export default function BuyerMessages() {
             <div className="hidden md:flex flex-1 flex-col justify-center items-center text-center p-8 text-gray-500">
               <ChatBubbleLeftEllipsisIcon className="h-20 w-20 text-gray-300 mb-4" />
               <h2 className="text-xl font-semibold">Select a conversation</h2>
-              <p>Choose a conversation from the list to view messages.</p>
+              <p>Choose a conversation from the list to view messages or start a new one by contacting a seller from a product page.</p>
             </div>
           )}
         </div>

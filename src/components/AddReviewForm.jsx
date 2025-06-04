@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { StarIcon } from '@heroicons/react/24/solid';
-import { StarIcon as StarOutlineIcon } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
-// Import useAuthContext to get the current user's ID if needed, although typically backend derives it from token
-// import { useAuthContext } from '../context/AuthContext'; // Assuming AuthContext provides currentUser.id
+import apiClient from '../services/api'; 
+import { useAuthContext } from '../context/AuthContext'; 
+import { useSignupSigninModal } from '../hooks/useSignupSigninModal'; // To prompt login
 
-const AddReviewForm = ({ productId, onSubmitReview, existingReview }) => {
-  // const { currentUser } = useAuthContext(); // Get current user if frontend needs to pass userId (backend should prefer deriving from token)
+const AddReviewForm = ({ productId, onReviewSubmitted, existingReview }) => {
+  const { currentUser, isAuthenticated, userRole } = useAuthContext();
+  const { openModal, switchToTab } = useSignupSigninModal();
 
   const [rating, setRating] = useState(0);
   const [hoverRating, setHoverRating] = useState(0);
@@ -19,16 +20,23 @@ const AddReviewForm = ({ productId, onSubmitReview, existingReview }) => {
       setRating(existingReview.rating || 0);
       setComment(existingReview.comment || '');
     } else {
-      // Reset form for adding a new review
+      // Reset for new review form
       setRating(0);
       setComment('');
+      setError('');
     }
   }, [existingReview]);
-
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+
+    if (!isAuthenticated || userRole !== 'BUYER') {
+      toast.error("Please sign in as a Buyer to submit reviews.");
+      switchToTab("signin"); // Switch to signin tab
+      openModal();
+      return;
+    }
 
     if (rating === 0) {
       setError("Please select a star rating.");
@@ -47,40 +55,46 @@ const AddReviewForm = ({ productId, onSubmitReview, existingReview }) => {
     }
 
     setIsSubmitting(true);
-
-    // Prepare the review data object.
-    // The backend ReviewDto expects: { rating, comment, productId }
-    // userId and userName are typically derived by the backend from the authenticated user's JWT.
-    // The 'date' is also typically set by the backend.
-    const reviewData = {
-      // productId is already a prop
-      rating,
+    
+    // This payload is for the body of the request.
+    // For POST, productId and userId are in the URL.
+    // For PUT, reviewId is in the URL.
+    // The backend ReviewDto expects rating & comment.
+    const payload = { 
+      rating: rating,
       comment: comment.trim(),
-      // If editing an existing review, include its ID.
-      // The backend PUT endpoint /api/reviews/{reviewId} will use this.
-      ...(existingReview && { reviewId: existingReview.id })
-      // No need to pass userId explicitly if backend derives it from the auth token.
-      // Example if needed: userId: currentUser?.id
+      // Backend will set productId, userId, and date for new reviews based on URL/context.
+      // For updates, backend might not need productId/userId in payload if not changing them.
     };
+    // If updating, our backend DTO for update might only need rating and comment.
+    // Let's ensure the payload for PUT is just what can be updated.
+    const updatePayload = { rating, comment: comment.trim() };
+
 
     try {
-      // The onSubmitReview prop (passed from a parent component like ProductDetails.jsx)
-      // will handle the actual API call (POST to /api/reviews for new, PUT to /api/reviews/{id} for update).
-      // It should include the JWT token in the Authorization header.
-      await onSubmitReview(reviewData);
+      if (existingReview && existingReview.id) {
+        // Update existing review: PUT /api/reviews/{reviewId}
+        // Backend ReviewService.updateReview expects ReviewDto in body (rating, comment).
+        await apiClient.put(`/reviews/${existingReview.id}`, updatePayload);
+        toast.success("Review updated successfully!");
+      } else {
+        // Add new review: POST /api/reviews/product/{productId}/user/{userId}
+        // Backend ReviewService.addReview expects ReviewDto in body (rating, comment).
+        await apiClient.post(`/reviews/product/${productId}/user/${currentUser.id}`, payload);
+        toast.success("Review submitted successfully!");
+      }
       
-      // Toast for success will likely be handled in the parent component (e.g., ProductDetails.jsx)
-      // after a successful API response.
-      // Reset form only if it's not an edit, or if parent signals to reset after successful edit.
-      if (!existingReview) {
+      if (onReviewSubmitted) {
+        onReviewSubmitted(); // Notify parent to refetch reviews
+      }
+
+      if (!existingReview) { // Reset form only for new submissions
         setRating(0);
         setComment('');
       }
     } catch (err) {
-      // This catch block will handle errors thrown by the onSubmitReview function
-      // (e.g., network errors, or errors from the API call if not caught by parent).
-      console.error("Error submitting review from AddReviewForm:", err);
-      const errorMessage = err.response?.data?.message || err.message || "Failed to submit review. Please try again.";
+      console.error("Error submitting review:", err.response?.data || err.message);
+      const errorMessage = err.response?.data?.message || "Failed to submit review. Please try again.";
       toast.error(errorMessage);
       setError(errorMessage);
     } finally {
@@ -106,6 +120,15 @@ const AddReviewForm = ({ productId, onSubmitReview, existingReview }) => {
       </button>
     );
   }
+
+  if (!isAuthenticated || userRole !== 'BUYER') {
+    return (
+        <div className="bg-white p-6 rounded-lg shadow-lg border border-gray-200 mt-8 text-center">
+            <p className="text-gray-600">Please <button onClick={() => { switchToTab("signin"); openModal(); }} className="text-blue-600 hover:underline">sign in as a Buyer</button> to write a review.</p>
+        </div>
+    );
+  }
+
 
   return (
     <div className="bg-white p-6 rounded-lg shadow-lg border border-gray-200 mt-8">

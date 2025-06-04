@@ -1,18 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { EyeIcon, EyeSlashIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useSignupSigninModal } from "../hooks/useSignupSigninModal.jsx";
-import { useAuthContext } from "../context/AuthContext"; // This context will handle the actual API calls
+import { useAuthContext } from "../context/AuthContext";
 import toast from 'react-hot-toast';
-
-// Mock data imports (buyers.json, sellers.json) should have been removed,
-// as authentication will now be handled by the backend.
-// The backend UserController exposes /api/users/signup and /api/users/signin
 
 export default function SignupSigninModal() {
   const { isOpen, closeModal, activeTab, switchToTab } = useSignupSigninModal();
-  // useAuthContext will provide functions that make API calls to the backend.
-  // isLoading will reflect the state of these API calls.
-  const { signin, signup, isLoading: authIsLoading } = useAuthContext(); 
+  const { signin, signup, isLoading: authIsLoading } = useAuthContext();
 
   const initialFormState = {
     firstName: "",
@@ -20,20 +14,22 @@ export default function SignupSigninModal() {
     email: "",
     password: "",
     confirmPassword: "",
-    role: "Buyer", // Default role for signup, matches backend UserSignUpDto
+    role: "BUYER", // Default role for signup, ensure matches backend expectations (e.g., uppercase)
   };
   const [formData, setFormData] = useState(initialFormState);
-
   const [showMainPassword, setShowMainPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [formErrors, setFormErrors] = useState({});
 
   useEffect(() => {
     if (isOpen) {
-        resetForm();
+        setFormData(initialFormState); // Reset form when modal becomes visible
+        setFormErrors({});
+        setShowMainPassword(false);
+        setShowConfirmPassword(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, isOpen]);
+  }, [isOpen, activeTab]); // Reset also if tab changes while open
+
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -49,23 +45,23 @@ export default function SignupSigninModal() {
   const handleBlur = (e) => {
     const { name, value } = e.target;
     let error = "";
-    // Client-side validation remains useful for immediate feedback
+    // Basic client-side validation on blur
+    if (name === "email") {
+        if (!value.trim()) error = "Email is required.";
+        else if (!/\S+@\S+\.\S+/.test(value)) error = "Email address is invalid.";
+    }
+    if (name === "password" && activeTab === 'signup') { // Only validate length for signup password on blur initially
+        if (!value) error = "Password is required.";
+        else if (value.length < 8) error = "Password must be at least 8 characters."; // Match backend DTO
+    } else if (name === "password" && activeTab === 'signin' && !value) {
+        error = "Password is required.";
+    }
     if (activeTab === 'signup') {
         if (name === "firstName" && !value.trim()) error = "First name is required.";
         if (name === "lastName" && !value.trim()) error = "Last name is required.";
-        if (name === "email") {
-            if (!value.trim()) error = "Email is required.";
-            else if (!/\S+@\S+\.\S+/.test(value)) error = "Email address is invalid.";
-        }
-        if (name === "password") {
-            if (!value) error = "Password is required.";
-            else if (value.length < 6) error = "Password must be at least 6 characters."; // Align with backend rules if different
-        }
-        if (name === "confirmPassword" && value !== formData.password) error = "Passwords do not match.";
-    } else { 
-        if (name === "email" && !value.trim()) error = "Email is required.";
-        if (name === "password" && !value) error = "Password is required.";
+        if (name === "confirmPassword" && formData.password && value !== formData.password) error = "Passwords do not match.";
     }
+
     if (error) {
         setFormErrors(prev => ({...prev, [name]: error}));
     } else if (formErrors[name]) {
@@ -76,30 +72,25 @@ export default function SignupSigninModal() {
   const toggleMainPasswordVisibility = () => setShowMainPassword((prev) => !prev);
   const toggleConfirmPasswordVisibility = () => setShowConfirmPassword((prev) => !prev);
 
-  const resetForm = () => {
-    setFormData(initialFormState);
-    setShowMainPassword(false);
-    setShowConfirmPassword(false);
-    setFormErrors({});
-  };
-
   const validateSignup = () => {
     const errors = {};
     if (!formData.firstName.trim()) errors.firstName = "First name is required.";
-    else if(formData.firstName.trim().length < 2) errors.firstName = "First name is too short."; // Example: align with backend validation
+    else if(formData.firstName.trim().length < 2) errors.firstName = "First name is too short.";
+    
     if (!formData.lastName.trim()) errors.lastName = "Last name is required.";
-    else if(formData.lastName.trim().length < 2) errors.lastName = "Last name is too short."; // Example: align with backend validation
+    else if(formData.lastName.trim().length < 2) errors.lastName = "Last name is too short.";
 
     if (!formData.email.trim()) errors.email = "Email is required.";
     else if (!/\S+@\S+\.\S+/.test(formData.email)) errors.email = "Email address is invalid.";
     
     if (!formData.password) errors.password = "Password is required.";
-    // Ensure this matches backend requirements (e.g., from SecurityConfig or DTO annotations)
-    else if (formData.password.length < 6) errors.password = "Password must be at least 6 characters."; 
+    else if (formData.password.length < 8) errors.password = "Password must be at least 8 characters."; // Match backend DTO
     
     if (!formData.confirmPassword) errors.confirmPassword = "Please confirm your password.";
     else if (formData.password !== formData.confirmPassword) errors.confirmPassword = "Passwords do not match.";
     
+    if (!formData.role) errors.role = "Please select a role."; // Should not happen with select default
+
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -113,75 +104,53 @@ export default function SignupSigninModal() {
     return Object.keys(errors).length === 0;
   };
 
-  const handleSignup = async (e) => {
+  const handleSignupSubmit = async (e) => {
     e.preventDefault();
-    setFormErrors({});
+    setFormErrors({}); 
     if (!validateSignup()) {
-        toast.error("Please correct the errors highlighted in the form.");
+        toast.error("Please correct the errors in the form.");
         return;
     }
 
-    // This data structure should match the backend's UserSignUpDto:
-    // { firstName, lastName, email, password, role }
-    const signupData = {
-      firstName: formData.firstName.trim(),
-      lastName: formData.lastName.trim(),
-      email: formData.email.trim(),
-      password: formData.password, // Password sent as is; backend handles hashing
-      role: formData.role, // 'Buyer' or 'Seller'
-    };
+    // Ensure role is uppercase as expected by backend
+    const payload = { ...formData, role: formData.role.toUpperCase() };
+    delete payload.confirmPassword; // Don't send confirmPassword to backend
 
-    // The signup function (from AuthContext) will make a POST request to /api/users/signup
-    // with signupData as the request body.
-    // It should also handle storing the JWT token returned by the backend upon successful signup.
-    const result = await signup(signupData);
+    const result = await signup(payload); // signup from AuthContext
 
     if (result.success && result.user) {
-      toast.success(`Welcome, ${result.user.firstName}! Account created successfully.`);
-      resetForm();
-      closeModal();
+      toast.success(result.message || `Account for ${result.user.firstName} created! Please sign in.`);
+      // switchToTab("signin"); // Optionally switch to signin tab
+      // setFormData(prev => ({...initialFormState, email: prev.email})); // Keep email for convenience
+      closeModal(); // Close modal on successful signup, user can then sign in
     } else {
-      // Error messages might come from the backend's GlobalExceptionHandler
-      const errorMessage = result.error || "Signup failed. Please try again.";
-      toast.error(errorMessage);
-      if (errorMessage.toLowerCase().includes("email") || errorMessage.toLowerCase().includes("already exists")) {
-        setFormErrors(prev => ({...prev, email: "This email is already registered."}));
+      toast.error(result.error || "Signup failed. Please try again.");
+      if (result.error && result.error.toLowerCase().includes("email")) {
+        setFormErrors(prev => ({...prev, email: result.error}));
       } else {
-        setFormErrors(prev => ({...prev, general: errorMessage}));
+        setFormErrors(prev => ({...prev, general: result.error || "An unexpected error occurred."}));
       }
     }
   };
 
-  const handleSignin = async (e) => {
+  const handleSigninSubmit = async (e) => {
     e.preventDefault();
-    setFormErrors({});
+    setFormErrors({}); 
     if (!validateSignin()) {
-        toast.error("Please correct the errors highlighted in the form.");
+        toast.error("Please correct the errors in the form.");
         return;
     }
+    const { email, password } = formData; 
     
-    // This data structure should match the backend's UserSignInDto:
-    // { email, password }
-    const signinData = {
-        email: formData.email.trim(),
-        password: formData.password,
-    };
-    
-    // The signin function (from AuthContext) will make a POST request to /api/users/signin
-    // with signinData as the request body.
-    // It will handle the JWT token returned by the backend (e.g., storing it in localStorage)
-    // and update the application's authentication state.
-    const result = await signin(signinData.email, signinData.password); // Assuming signin context function takes email and password
+    // roleAttempt is not used by our backend login, it determines role from credentials
+    const result = await signin(email, password, null); // signin from AuthContext
 
     if (result.success && result.user) {
       toast.success(`Welcome back, ${result.user.firstName}!`);
-      resetForm();
       closeModal();
     } else {
-      // Error messages might come from the backend (e.g., "Invalid credentials")
-      const errorMessage = result.error || "Sign in failed. Please check your credentials.";
-      toast.error(errorMessage);
-      setFormErrors({ general: errorMessage });
+      toast.error(result.error || "Sign in failed. Please check your credentials.");
+      setFormErrors({ general: result.error || "Invalid credentials. Please try again." });
     }
   };
 
@@ -191,7 +160,7 @@ export default function SignupSigninModal() {
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] px-4 py-8 transition-opacity duration-300 ease-in-out">
       <div className="bg-white w-full max-w-md rounded-xl shadow-2xl p-6 sm:p-8 relative animate-fade-in max-h-[90vh] overflow-y-auto">
         <button 
-          onClick={() => { resetForm(); closeModal(); }} 
+          onClick={closeModal} 
           className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
           aria-label="Close modal"
         >
@@ -200,20 +169,21 @@ export default function SignupSigninModal() {
 
         <div className="flex justify-center gap-0 mb-6 sm:mb-8 border-b border-gray-200">
           <button
-            onClick={() => { switchToTab("signup"); }} 
+            onClick={() => switchToTab("signup")} 
             className={`py-3 px-2 text-base sm:text-lg font-semibold transition-all duration-200 ease-in-out w-1/2 rounded-t-md ${activeTab === "signup" ? "border-b-3 border-blue-600 text-blue-600 bg-blue-50" : "text-gray-500 hover:text-gray-800 border-b-3 border-transparent hover:bg-gray-100"}`}
           >
             Sign Up
           </button>
           <button
-            onClick={() => { switchToTab("signin"); }} 
+            onClick={() => switchToTab("signin")} 
             className={`py-3 px-2 text-base sm:text-lg font-semibold transition-all duration-200 ease-in-out w-1/2 rounded-t-md ${activeTab === "signin" ? "border-b-3 border-blue-600 text-blue-600 bg-blue-50" : "text-gray-500 hover:text-gray-800 border-b-3 border-transparent hover:bg-gray-100"}`}
           >
             Sign In
           </button>
         </div>
         {formErrors.general && <p className="text-sm text-red-600 text-center mb-4 -mt-2">{formErrors.general}</p>}
-        <form onSubmit={activeTab === "signup" ? handleSignup : handleSignin} className="space-y-5">
+        
+        <form onSubmit={activeTab === "signup" ? handleSignupSubmit : handleSigninSubmit} className="space-y-5">
           {activeTab === "signup" && (
             <>
               <FloatingInput label="First Name" name="firstName" value={formData.firstName} onChange={handleChange} onBlur={handleBlur} error={formErrors.firstName} autoComplete="given-name" />
@@ -246,14 +216,15 @@ export default function SignupSigninModal() {
                 autoComplete="new-password"
               />
               <div>
-                <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-1.5">I am signing up as a:</label>
+                <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-1.5">Sign up as:</label>
                 <select
                   id="role" name="role" value={formData.role} onChange={handleChange}
                   className="w-full mt-1 border border-gray-300 px-3 py-2.5 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm bg-white"
                 >
-                  <option value="Buyer">Buyer</option>
-                  <option value="Seller">Seller</option>
+                  <option value="BUYER">Buyer</option>
+                  <option value="SELLER">Seller</option>
                 </select>
+                 {formErrors.role && <p className="text-xs text-red-600 mt-1">{formErrors.role}</p>}
               </div>
             </>
           )}
@@ -281,9 +252,8 @@ export default function SignupSigninModal() {
   );
 }
 
-// FloatingInput and FloatingPasswordInput components (unchanged from your original)
-// These are well-styled and functional for the UI.
-
+// FloatingInput and FloatingPasswordInput components (assuming they are defined elsewhere or provided)
+// For completeness, I'll include their definitions as you had them.
 function FloatingInput({ label, name, type = "text", value, onChange, onBlur, error, autoComplete }) {
   return (
     <div className="relative mt-2"> 
@@ -291,7 +261,8 @@ function FloatingInput({ label, name, type = "text", value, onChange, onBlur, er
         type={type} name={name} id={name} value={value} onChange={onChange} onBlur={onBlur}
         placeholder=" " 
         className={`peer w-full px-3 pt-4 pb-2 text-base text-gray-900 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent ${error ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-blue-500'}`}
-        required autoComplete={autoComplete}
+        required={type !== "checkbox" && type !== "radio"} // Basic required for text inputs
+        autoComplete={autoComplete}
       />
       <label
         htmlFor={name}
@@ -315,7 +286,8 @@ function FloatingPasswordInput({ label, name, value, onChange, onBlur, show, tog
         type={show ? "text" : "password"} name={name} id={name} value={value} onChange={onChange} onBlur={onBlur}
         placeholder=" " 
         className={`peer w-full px-3 pt-4 pb-2 text-base text-gray-900 border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent ${error ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-blue-500'}`}
-        required autoComplete={autoComplete}
+        required
+        autoComplete={autoComplete}
       />
       <label
         htmlFor={name}

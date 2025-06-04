@@ -1,37 +1,42 @@
 import { useState, useEffect, useCallback } from 'react';
+import apiClient from '../services/api';
 
 /**
- * Custom hook to fetch data and cache it.
+ * Custom hook to fetch data using Axios and cache it.
  * Prioritizes sessionStorage for timed caching.
- * Optionally uses localStorage as a more persistent "source of truth" after initial fetch from URL.
+ * Optionally uses localStorage as a more persistent "source of truth" after initial fetch.
  */
 export function useFetchCached(cacheKey, url, options = {}) {
+  // url here is the relative path to the API endpoint (e.g., '/products', '/users/me')
+  // apiClient will prepend the API_BASE_URL.
+
   const { cacheDuration = 5 * 60 * 1000, useLocalStoragePersistence = false } = options;
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [refetchIndex, setRefetchIndex] = useState(0);
+  const [refetchIndex, setRefetchIndex] = useState(0); // To trigger refetch
 
   const forceRefetch = useCallback(() => {
     console.log(`useFetchCached: Forcing refetch for "${cacheKey}". Clearing sessionStorage.`);
     try {
       sessionStorage.removeItem(cacheKey);
-      // To truly force a re-fetch from the original URL and re-seed localStorage,
-      // localStorage.removeItem(cacheKey); // would need to be called *before* this.
-      // For now, forceRefetch clears session cache, leading to re-check of localStorage then URL.
+      // If you want to force a complete re-fetch from URL, also clear localStorage if it's used.
+      // if (useLocalStoragePersistence) {
+      //   localStorage.removeItem(cacheKey);
+      // }
     } catch (e) {
       console.warn(`useFetchCached: Could not remove item from sessionStorage for key "${cacheKey}"`, e);
     }
-    setRefetchIndex(prevIndex => prevIndex + 1); // Trigger the useEffect
-  }, [cacheKey]);
+    setRefetchIndex(prevIndex => prevIndex + 1); // Trigger the useEffect to refetch
+  }, [cacheKey /*, useLocalStoragePersistence */]);
 
 
   useEffect(() => {
     let isMounted = true;
     setLoading(true);
     setError(null);
-    setData(null); 
+    // setData(null); // Optionally reset data on new fetch/refetch
 
     const fetchData = async () => {
       console.log(`useFetchCached: Attempting to get data for "${cacheKey}". Persistence: ${useLocalStoragePersistence}`);
@@ -48,7 +53,7 @@ export function useFetchCached(cacheKey, url, options = {}) {
               setLoading(false);
             }
             console.log(`useFetchCached: Serving data for "${cacheKey}" from valid sessionStorage.`);
-            return; 
+            return;
           } else {
             console.log(`useFetchCached: SessionStorage for "${cacheKey}" expired or invalid.`);
             sessionStorage.removeItem(cacheKey);
@@ -56,48 +61,46 @@ export function useFetchCached(cacheKey, url, options = {}) {
         }
       } catch (e) {
         console.warn(`useFetchCached: Error with sessionStorage for "${cacheKey}"`, e);
-        sessionStorage.removeItem(cacheKey); 
+        sessionStorage.removeItem(cacheKey);
       }
 
       // 2. If useLocalStoragePersistence is true, try localStorage
       if (useLocalStoragePersistence) {
         try {
-          const localCachedItemString = localStorage.getItem(cacheKey); 
-          if (localCachedItemString) { 
+          const localCachedItemString = localStorage.getItem(cacheKey);
+          if (localCachedItemString) {
             const localCachedData = JSON.parse(localCachedItemString);
-            // Ensure it's a non-empty array if we expect an array (like for "products")
-            if (Array.isArray(localCachedData) && localCachedData.length > 0) {
+            // Basic check if data seems valid (e.g., if expecting an array)
+            const dataIsValid = Array.isArray(localCachedData) ? localCachedData.length > 0 : localCachedData !== null;
+
+            if (dataIsValid) {
                 if (isMounted) {
                   setData(localCachedData);
                   try { // Refresh sessionStorage with this data from localStorage
                     sessionStorage.setItem(cacheKey, JSON.stringify({ data: localCachedData, timestamp: new Date().getTime() }));
-                  } catch (se) {/* ignore session storage error */}
+                  } catch (se) {
+                    console.warn(`useFetchCached: Could not update sessionStorage for "${cacheKey}" from localStorage.`, se);
+                  }
                   setLoading(false);
                 }
-                console.log(`useFetchCached: Serving data for "${cacheKey}" from localStorage (non-empty array).`);
-                return; 
-            } else if (!Array.isArray(localCachedData) || localCachedData.length === 0) {
+                console.log(`useFetchCached: Serving data for "${cacheKey}" from localStorage.`);
+                return;
+            } else {
                 console.log(`useFetchCached: localStorage for "${cacheKey}" is empty/invalid. Will fetch from URL to re-seed.`);
-                // Do not return; proceed to fetch from URL to re-seed localStorage.
             }
           } else {
             console.log(`useFetchCached: No data for "${cacheKey}" in localStorage. Will fetch from URL to seed it.`);
           }
         } catch (e) {
           console.warn(`useFetchCached: Error reading from localStorage for "${cacheKey}". Will fetch from URL.`, e);
-          // Potentially clear corrupted localStorage entry before fetching to ensure clean seed
-          // localStorage.removeItem(cacheKey); 
         }
       }
 
-      // 3. If no valid cache (session or local was empty/invalid), fetch from URL
-      console.log(`useFetchCached: Fetching data for "${cacheKey}" from URL: ${url}`);
+      // 3. If no valid cache, fetch from URL using apiClient
+      console.log(`useFetchCached: Fetching data for "${cacheKey}" from API endpoint: ${url}`);
       try {
-        const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status} for ${url}`);
-        }
-        const fetchedData = await response.json();
+        const response = await apiClient.get(url); // Using apiClient.get()
+        const fetchedData = response.data; // Data is in response.data with Axios
 
         if (isMounted) {
           setData(fetchedData);
@@ -108,21 +111,20 @@ export function useFetchCached(cacheKey, url, options = {}) {
              console.warn(`useFetchCached: Could not set item in sessionStorage for key "${cacheKey}"`, se);
           }
 
-          // If using localStorage persistence, store/overwrite it with the fresh data from the URL.
-          // This acts as the initial seed or a reset if localStorage was found empty/invalid in step 2.
           if (useLocalStoragePersistence) {
             try {
-                localStorage.setItem(cacheKey, JSON.stringify(fetchedData)); 
-                console.log(`useFetchCached: Data for "${cacheKey}" (re-)seeded into localStorage from URL.`);
+                localStorage.setItem(cacheKey, JSON.stringify(fetchedData));
+                console.log(`useFetchCached: Data for "${cacheKey}" (re-)seeded into localStorage from API.`);
             } catch (le) {
-                console.warn(`useFetchCached: Could not set item in localStorage for key "${cacheKey}" after fetching from URL.`, le);
+                console.warn(`useFetchCached: Could not set item in localStorage for key "${cacheKey}" after fetching from API.`, le);
             }
           }
         }
       } catch (err) {
         if (isMounted) {
-          console.error(`useFetchCached: Error fetching data for "${cacheKey}" from ${url}:`, err);
-          setError(err);
+          const errorMessage = err.response?.data?.message || err.message || "Failed to fetch data.";
+          console.error(`useFetchCached: Error fetching data for "${cacheKey}" from ${url}:`, errorMessage, err.response || err);
+          setError({ message: errorMessage, status: err.response?.status });
         }
       } finally {
         if (isMounted) {
@@ -131,21 +133,32 @@ export function useFetchCached(cacheKey, url, options = {}) {
       }
     };
 
-    fetchData();
+    if (url) { // Only fetch if URL is provided
+        fetchData();
+    } else {
+        setLoading(false); // No URL, so not loading
+    }
+
 
     return () => {
-      isMounted = false; 
+      isMounted = false;
     };
-  }, [url, cacheKey, cacheDuration, useLocalStoragePersistence, refetchIndex]); 
+  }, [url, cacheKey, cacheDuration, useLocalStoragePersistence, refetchIndex]);
 
   return { data, loading, error, forceRefetch };
 }
 
+// invalidateCacheEntry function can remain largely the same,
+// but it only clears sessionStorage. If localStorage is also used for persistence
+// and needs to be cleared on demand, that would require an extension or a separate function.
 export const invalidateCacheEntry = (cacheKey) => {
     try {
       sessionStorage.removeItem(cacheKey);
       console.log(`useFetchCached: Manually invalidated sessionStorage cache for key "${cacheKey}".`);
+      // If you also want to clear the persistent localStorage on manual invalidation:
+      // localStorage.removeItem(cacheKey);
+      // console.log(`useFetchCached: Manually invalidated localStorage cache for key "${cacheKey}".`);
     } catch (e) {
-      console.warn(`useFetchCached: Could not remove item from sessionStorage for key "${cacheKey}" during manual invalidation`, e);
+      console.warn(`useFetchCached: Could not remove item from sessionStorage (or localStorage) for key "${cacheKey}" during manual invalidation`, e);
     }
 };

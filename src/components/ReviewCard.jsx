@@ -1,101 +1,87 @@
 import React from 'react';
-import { StarIcon as StarSolid } from '@heroicons/react/24/solid';
-import { StarIcon as StarOutline } from '@heroicons/react/24/outline';
+import { StarIcon as StarSolidIcon } from '@heroicons/react/24/solid';
+import { StarIcon as StarOutlineIcon } from '@heroicons/react/24/outline'; // For empty parts of stars
 
-// This component displays a single product review.
-// It expects a 'review' prop that aligns with the backend's ReviewDto.
-// Backend ReviewDto fields: id, productId, userId, rating, comment, date.
-
-export default function ReviewCard({ review }) {
+const ReviewCard = ({ review, currentUserId, onEditReview, onDeleteReview, isAdmin }) => {
   if (!review) {
-    // Simple placeholder for when review data is not available
-    return (
-      <div className="bg-white p-5 rounded-lg shadow-md border border-gray-200 animate-pulse">
-        <div className="h-4 bg-gray-300 rounded w-1/4 mb-3"></div>
-        <div className="h-3 bg-gray-300 rounded w-full mb-2"></div>
-        <div className="h-3 bg-gray-300 rounded w-5/6 mb-3"></div>
-        <div className="flex justify-between items-center">
-          <div className="h-3 bg-gray-300 rounded w-1/3"></div>
-          <div className="h-3 bg-gray-300 rounded w-1/4"></div>
-        </div>
-      </div>
-    );
+    return null; 
   }
 
-  // Destructure expected fields from the review prop (based on ReviewDto)
-  const { userId, rating, comment, date: reviewDateString } = review; 
-  // The 'userName' prop is no longer directly expected from the review object itself.
-  // If a userName is passed separately (e.g., fetched by parent), it could be accepted as another prop.
-  // For now, we'll display userId or a generic "User".
-
-  const displayUserName = review.userName || `User ID: ${userId.substring(0, 8)}...`; // Example: Show part of userId or a passed userName
+  // Backend ReviewDto now includes:
+  // id (reviewId), productId, userId, userName, rating, comment, date (ISO string)
+  const { id: reviewId, userId: reviewAuthorId, userName, rating, comment, date } = review;
 
   const renderStars = (count) => {
     const stars = [];
-    const fullStars = Math.floor(count);
-    // For simplicity, rounding to nearest half or full star for display
-    const roundedRating = Math.round(count * 2) / 2; 
+    const numericRating = parseFloat(count); // Ensure rating is a number
+    const roundedRating = Math.round(numericRating * 2) / 2; // Rounds to nearest .0 or .5
 
     for (let i = 1; i <= 5; i++) {
       if (i <= roundedRating) {
-        stars.push(<StarSolid key={`star-solid-${i}-${review.id}`} className="h-5 w-5 text-yellow-400" />);
-      } else if (i - 0.5 === roundedRating) { // Visual cue for half star
-        stars.push(
-          <div key={`star-half-${i}-${review.id}`} className="relative">
-            <StarOutline className="h-5 w-5 text-yellow-400" />
-            <div className="absolute top-0 left-0 overflow-hidden w-1/2">
-              <StarSolid className="h-5 w-5 text-yellow-400" />
+        stars.push(<StarSolidIcon key={`star-solid-${i}-${reviewId}`} className="h-5 w-5 text-yellow-400" />);
+      } else if (i - 0.5 === roundedRating) { // For visualizing a half-star effect
+         stars.push(
+            <div key={`star-half-${i}-${reviewId}`} className="relative h-5 w-5">
+                <StarOutlineIcon className="absolute h-5 w-5 text-yellow-400" />
+                <StarSolidIcon className="absolute h-5 w-5 text-yellow-400" style={{ clipPath: 'inset(0 50% 0 0)' }}/>
             </div>
-          </div>
-        );
-      }
-      else {
-        stars.push(<StarOutline key={`star-outline-${i}-${review.id}`} className="h-5 w-5 text-yellow-300" />); // Slightly different color for empty
+         );
+      } else {
+        stars.push(<StarOutlineIcon key={`star-outline-${i}-${reviewId}`} className="h-5 w-5 text-gray-300" />);
       }
     }
     return stars;
   };
 
-  let formattedDate = 'Date not available';
-  if (reviewDateString) {
-    try {
-      // Attempt to parse the date string. Backend sends "yyyy-MM-dd HH:mm:ss"
-      // JavaScript's Date constructor can often handle this format, but might be locale-dependent.
-      // For more robust parsing, a library like date-fns would be better.
-      const dateObj = new Date(reviewDateString.replace(' ', 'T')); // Replace space with T for better ISO compatibility
-      if (!isNaN(dateObj.getTime())) {
-        formattedDate = dateObj.toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-        });
-      }
-    } catch (error) {
-      console.error("Error formatting review date:", error);
-      // formattedDate remains 'Date not available'
-    }
-  }
-  
+  const formattedDate = date ? new Date(date).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }) : 'Date not available';
+
+  const canModify = isAdmin || (currentUserId && currentUserId === reviewAuthorId);
 
   return (
     <div className="bg-white p-5 rounded-lg shadow-md border border-gray-200">
-      <div className="flex items-center mb-2">
-        <div className="flex mr-2">
-          {renderStars(rating)}
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center">
+            <div className="flex mr-2">
+            {renderStars(rating)}
+            </div>
+            <p className="text-sm font-semibold text-gray-800">{parseFloat(rating).toFixed(1)} out of 5</p>
         </div>
-        {typeof rating === 'number' && (
-            <p className="text-sm font-semibold text-gray-800">{rating.toFixed(1)} out of 5</p>
+        {canModify && (
+            <div className="flex space-x-2">
+                <button 
+                    onClick={() => onEditReview && onEditReview(review)}
+                    className="text-xs text-blue-600 hover:text-blue-800"
+                    aria-label="Edit review"
+                >
+                    Edit
+                </button>
+                <button 
+                    onClick={() => onDeleteReview && onDeleteReview(reviewId)}
+                    className="text-xs text-red-600 hover:text-red-800"
+                    aria-label="Delete review"
+                >
+                    Delete
+                </button>
+            </div>
         )}
       </div>
-      <p className="text-sm text-gray-700 mb-3 leading-relaxed break-words">
+      <p className="text-sm text-gray-700 mb-3 leading-relaxed whitespace-pre-wrap">
         {comment || "No comment provided."}
       </p>
-      <div className="flex justify-between items-center text-xs">
-        <p className="font-medium text-gray-600">
-          By: <span className="font-bold text-gray-700">{displayUserName}</span>
+      <div className="flex justify-between items-center">
+        <p className="text-xs font-medium text-gray-600">
+          By: <span className="font-bold">{userName || "Anonymous"}</span>
         </p>
-        <p className="text-gray-500">{formattedDate}</p>
+        <p className="text-xs text-gray-500">{formattedDate}</p>
       </div>
     </div>
   );
 };
+
+export default ReviewCard;

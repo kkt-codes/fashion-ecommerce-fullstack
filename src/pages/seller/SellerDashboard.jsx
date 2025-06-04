@@ -1,170 +1,122 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import Sidebar from "../../components/Sidebar"; 
+import Sidebar from "../../components/Sidebar";
 import { useAuthContext } from "../../context/AuthContext";
-// Removed useFetchCached
+import apiClient from "../../services/api"; // For API calls
 import {
   ArchiveBoxIcon,
   CurrencyDollarIcon,
   ChatBubbleLeftEllipsisIcon,
   PlusCircleIcon,
-  ChartBarIcon, 
-  EyeIcon, // For recent activity
-  ExclamationTriangleIcon 
+  EyeIcon,
+  ExclamationTriangleIcon
 } from "@heroicons/react/24/outline";
 import toast from "react-hot-toast";
 
-const API_BASE_URL = 'http://localhost:8080/api';
-
 export default function SellerDashboard() {
-  const { currentUser, isLoading: isAuthLoading, userRole } = useAuthContext(); 
+  const { currentUser, isLoading: isAuthLoading, userRole } = useAuthContext();
+
+  const [productCount, setProductCount] = useState(0);
+  const [unreadMessageCount, setUnreadMessageCount] = useState(0);
+  const [totalSalesDisplay, setTotalSalesDisplay] = useState("N/A"); // Mock or N/A for now
   
-  const [sellerProducts, setSellerProducts] = useState([]);
-  const [productsLoading, setProductsLoading] = useState(true);
-  const [productsError, setProductsError] = useState(null);
-  
-  const [messageCount, setMessageCount] = useState(0);
-  const [messagesLoading, setMessagesLoading] = useState(true);
-  const [messagesError, setMessagesError] = useState(null);
+  const [isLoadingDashboardData, setIsLoadingDashboardData] = useState(true);
+  const [dashboardError, setDashboardError] = useState(null);
 
-  // Total Sales will be a placeholder or very basic estimation from product prices
-  const [estimatedTotalValue, setEstimatedTotalValue] = useState(0); 
-
-  const sellerLinks = [
-    { label: "Dashboard", path: "/seller/dashboard", icon: ChartBarIcon },
-    { label: "My Products", path: "/seller/products", icon: ArchiveBoxIcon },
-    { label: "Add Product", path: "/seller/add-product", icon: PlusCircleIcon },
-    { label: "Messages", path: "/seller/messages", icon: ChatBubbleLeftEllipsisIcon }
-  ];
-
-  const fetchSellerProducts = useCallback(async (sellerId) => {
-    setProductsLoading(true);
-    setProductsError(null);
-    try {
-      // Assuming backend ProductController is updated to handle ?sellerId=...
-      // Or a new endpoint like /api/products/seller/{sellerId}
-      const response = await fetch(`${API_BASE_URL}/products?sellerId=${sellerId}&page=0&size=1000`); // Fetch all seller products
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ message: "Failed to load your products" }));
-        throw new Error(errorData.message);
-      }
-      const productPage = await response.json(); // Expects Page<ProductDto>
-      const products = productPage.content || [];
-      setSellerProducts(products);
-      // Basic estimation of total value of listed products
-      const totalValue = products.reduce((acc, p) => acc + p.price, 0);
-      setEstimatedTotalValue(totalValue);
-
-    } catch (e) {
-      console.error("SellerDashboard: Error fetching seller products:", e);
-      setProductsError(e.message);
-      setSellerProducts([]);
-      setEstimatedTotalValue(0);
-      toast.error("Could not load your product data.");
-    } finally {
-      setProductsLoading(false);
-    }
-  }, []);
-
-  const fetchUnreadMessageCount = useCallback(async (userId) => {
-    setMessagesLoading(true);
-    setMessagesError(null);
-    let totalUnread = 0;
-    try {
-      const convResponse = await fetch(`${API_BASE_URL}/chat/user/${userId}/conversations`);
-      if (!convResponse.ok) throw new Error("Failed to load conversations for message count.");
-      const conversations = await convResponse.json();
-
-      if (conversations && conversations.length > 0) {
-        for (const convo of conversations) {
-          const unreadResponse = await fetch(`${API_BASE_URL}/chat/conversation/${convo.id}/unread/${userId}`);
-          if (unreadResponse.ok) {
-            const unreadMessages = await unreadResponse.json();
-            totalUnread += unreadMessages.length;
-          }
-        }
-      }
-      setMessageCount(totalUnread);
-    } catch (e) {
-      console.error("SellerDashboard: Error fetching message count:", e);
-      setMessagesError(e.message);
-      setMessageCount(0);
-      toast.error("Could not load your message count.");
-    } finally {
-      setMessagesLoading(false);
-    }
-  }, []);
+  // Recent activity remains static for this example
+  const recentActivity = [
+    { id: 1, text: `You listed "Vintage Leather Jacket".`, time: "2 hours ago", type: "product", linkTo: "/seller/products" },
+    { id: 2, text: `New message from BuyerX regarding "Handmade Scarf".`, time: "5 hours ago", type: "message", linkTo: "/seller/messages" },
+    { id: 3, text: `Your product "Classic Blue Jeans" received 10 views today.`, time: "1 day ago", type: "stats", linkTo: "#" },
+  ].slice(0, 3);
 
   useEffect(() => {
-    if (isAuthLoading) return;
-
-    if (currentUser && userRole === 'Seller') {
-      fetchSellerProducts(currentUser.id);
-      fetchUnreadMessageCount(currentUser.id);
-    } else {
-      setSellerProducts([]);
-      setEstimatedTotalValue(0);
-      setMessageCount(0);
-      setProductsLoading(false);
-      setMessagesLoading(false);
+    if (isAuthLoading) {
+      return; // Wait for authentication to resolve
     }
-  }, [currentUser, userRole, isAuthLoading, fetchSellerProducts, fetchUnreadMessageCount]);
 
-  // Recent activity remains mock data for now.
-  // Real implementation would require backend event logging and an API.
-  const recentActivity = [
-    { id: 1, text: `You listed a new product.`, time: "2 hours ago", type: "product", linkTo: "/seller/products" },
-    { id: 2, text: `New message from a buyer.`, time: "5 hours ago", type: "message", linkTo: "/seller/messages" },
-  ].slice(0, 3); 
+    if (currentUser && userRole === 'SELLER') {
+      const fetchDashboardData = async () => {
+        setIsLoadingDashboardData(true);
+        setDashboardError(null);
+        try {
+          // Fetch seller's product stats (count)
+          // Backend GET /api/products expects sellerId as a filter, returns Page<ProductDto>
+          const productsResponse = await apiClient.get(`/products?sellerId=${currentUser.id}&size=1`); // size=1 just to get totalElements
+          setProductCount(productsResponse.data?.totalElements || 0);
 
-  const userName = currentUser?.firstname || "Seller";
+          // Fetch unread message count
+          try {
+            const messagesResponse = await apiClient.get('/chat/user/me/unread-count');
+            setUnreadMessageCount(messagesResponse.data?.unreadCount || 0);
+          } catch (msgError) {
+            console.warn("SellerDashboard: Could not fetch unread message count.", msgError.response?.data || msgError.message);
+            setUnreadMessageCount(0); // Default to 0 if endpoint fails
+          }
+          
+          // Total Sales: This remains a placeholder as backend doesn't provide this directly.
+          // In a real app, this would be a complex query on fulfilled orders.
+          // For now, we can set a mock value or keep N/A
+          // setTotalSalesDisplay("$1,234.56"); // Example mock value
 
-  if (isAuthLoading) {
+        } catch (error) {
+          console.error("SellerDashboard: Error fetching dashboard data:", error.response?.data || error.message);
+          const errMsg = error.response?.data?.message || "Could not load dashboard data.";
+          setDashboardError(errMsg);
+          toast.error(errMsg);
+          setProductCount(0);
+          setUnreadMessageCount(0);
+        } finally {
+          setIsLoadingDashboardData(false);
+        }
+      };
+      fetchDashboardData();
+    } else {
+      setIsLoadingDashboardData(false);
+      setProductCount(0);
+      setUnreadMessageCount(0);
+    }
+  }, [currentUser, userRole, isAuthLoading]);
+
+  if (isAuthLoading || (isLoadingDashboardData && !currentUser)) {
     return (
-      <div className="flex min-h-screen bg-gray-100">
-        <Sidebar links={sellerLinks} userRole="Seller" userName={userName} />
-        <main className="flex-1 p-6 sm:p-8 flex justify-center items-center">
-           <div className="flex flex-col items-center">
+      <div className="flex justify-center items-center min-h-screen bg-gray-100">
+        <div className="flex flex-col items-center">
             <svg className="animate-spin h-10 w-10 text-blue-600 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
             <p className="text-gray-500 text-lg">Loading Seller Dashboard...</p>
-          </div>
-        </main>
+        </div>
       </div>
     );
   }
 
-  if (!currentUser || userRole !== 'Seller') {
+  if (!currentUser || userRole !== 'SELLER') {
+    // This case should ideally be handled by SellerProtectedRoute
     return (
-      <div className="flex min-h-screen bg-gray-100">
-         <Sidebar links={sellerLinks} userRole="Seller" userName={userName} />
-        <main className="flex-1 p-6 sm:p-8 flex flex-col justify-center items-center text-center">
-            <ArchiveBoxIcon className="h-16 w-16 text-gray-400 mb-4" />
-            <h2 className="text-xl font-semibold text-gray-700 mb-2">Access Denied</h2>
-            <p className="text-gray-600">Please sign in as a Seller to view the dashboard.</p>
-        </main>
+      <div className="flex justify-center items-center min-h-screen bg-gray-100">
+        <p className="text-red-500">Access Denied. Please sign in as a Seller.</p>
       </div>
     );
   }
-  
+
   return (
     <div className="flex min-h-screen bg-gray-100">
-      <Sidebar links={sellerLinks} userRole="Seller" userName={userName} />
+      <Sidebar /> {/* Sidebar now gets its props from AuthContext */}
 
       <main className="flex-1 p-6 sm:p-8 space-y-8">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">
-              Welcome back, {userName}!
+              Welcome back, {currentUser.firstName}!
             </h1>
             <p className="text-sm text-gray-600 mt-1">
               Here's what's happening with your store today.
             </p>
           </div>
           <Link
-            to="/seller/add-product"
+            to="/seller/products/add" // Updated path for adding product
             className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
           >
             <PlusCircleIcon className="h-5 w-5" />
@@ -172,71 +124,60 @@ export default function SellerDashboard() {
           </Link>
         </div>
 
+        {dashboardError && !isLoadingDashboardData && (
+            <div className="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-lg shadow" role="alert">
+                <div className="flex items-center">
+                    <ExclamationTriangleIcon className="h-6 w-6 mr-2"/>
+                    <span className="font-medium">Dashboard Error:</span>
+                </div>
+                <p className="mt-1">{dashboardError}</p>
+            </div>
+        )}
+
         {/* Stats Overview Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {/* Products Card */}
-          <div className="bg-white p-6 rounded-xl shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1">
-            {productsLoading ? (<p className="text-sm text-gray-500 animate-pulse">Loading products...</p>) :
-             productsError ? (<p className="text-sm text-red-500">Error products</p>) : (
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Total Products</p>
-                  <p className="text-3xl font-bold text-gray-800 mt-1">{sellerProducts.length}</p>
-                </div>
-                <div className="p-3 bg-blue-100 rounded-full"> <ArchiveBoxIcon className="h-6 w-6 text-blue-600" /> </div>
+          <Link to="/seller/products" className="block bg-white p-6 rounded-xl shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Total Products</p>
+                <p className="text-3xl font-bold text-gray-800 mt-1">{isLoadingDashboardData ? '...' : productCount}</p>
               </div>
-            )}
-          </div>
-          
-          {/* Estimated Value Card */}
-          <div className="bg-white p-6 rounded-xl shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1">
-            {productsLoading ? (<p className="text-sm text-gray-500 animate-pulse">Calculating value...</p>) :
-             productsError ? (<p className="text-sm text-red-500">Error value</p>) : (
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Est. Listed Value</p>
-                  <p className="text-3xl font-bold text-gray-800 mt-1">${estimatedTotalValue.toFixed(2)}</p>
-                </div>
-                <div className="p-3 bg-green-100 rounded-full"> <CurrencyDollarIcon className="h-6 w-6 text-green-600" /> </div>
+              <div className="p-3 bg-blue-100 rounded-full">
+                <ArchiveBoxIcon className="h-6 w-6 text-blue-600" />
               </div>
-            )}
-             <p className="text-xs text-gray-400 mt-2 italic">Note: This is the total value of your listed products, not actual sales.</p>
-          </div>
-
-          {/* Messages Card */}
-          <div className="bg-white p-6 rounded-xl shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1">
-            {messagesLoading ? (<p className="text-sm text-gray-500 animate-pulse">Loading messages...</p>) :
-             messagesError ? (<p className="text-sm text-red-500">Error messages</p>) : (
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Unread Messages</p>
-                  <p className="text-3xl font-bold text-gray-800 mt-1">{messageCount}</p>
-                </div>
-                <div className="p-3 bg-purple-100 rounded-full"> <ChatBubbleLeftEllipsisIcon className="h-6 w-6 text-purple-600" /> </div>
+            </div>
+             <p className="text-xs text-blue-600 mt-4 hover:underline">Manage products &rarr;</p>
+          </Link>
+          <div className="bg-white p-6 rounded-xl shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1"> {/* Not a Link for now */}
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Total Sales (Est.)</p>
+                <p className="text-3xl font-bold text-gray-800 mt-1">{isLoadingDashboardData ? '...' : totalSalesDisplay}</p>
               </div>
-            )}
+              <div className="p-3 bg-green-100 rounded-full">
+                <CurrencyDollarIcon className="h-6 w-6 text-green-600" />
+              </div>
+            </div>
+            <p className="text-xs text-gray-400 mt-4">Sales data (mocked)</p>
           </div>
+          <Link to="/seller/messages" className="block bg-white p-6 rounded-xl shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">Unread Messages</p>
+                <p className="text-3xl font-bold text-gray-800 mt-1">{isLoadingDashboardData ? '...' : unreadMessageCount}</p>
+              </div>
+              <div className="p-3 bg-purple-100 rounded-full">
+                <ChatBubbleLeftEllipsisIcon className="h-6 w-6 text-purple-600" />
+              </div>
+            </div>
+            <p className="text-xs text-purple-600 mt-4 hover:underline">View messages &rarr;</p>
+          </Link>
         </div>
-
-        {/* Error Display Area */}
-        { (productsError && !productsLoading) && 
-            <div className="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-lg" role="alert">
-                <span className="font-medium">Product Data Error:</span> {productsError}
-                 <button onClick={() => fetchSellerProducts(currentUser.id)} className="ml-2 px-2 py-1 bg-red-200 text-red-800 rounded hover:bg-red-300 text-xs">Retry</button>
-            </div>
-        }
-        { (messagesError && !messagesLoading) && 
-            <div className="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-lg" role="alert">
-                <span className="font-medium">Message Data Error:</span> {messagesError}
-                <button onClick={() => fetchUnreadMessageCount(currentUser.id)} className="ml-2 px-2 py-1 bg-red-200 text-red-800 rounded hover:bg-red-300 text-xs">Retry</button>
-            </div>
-        }
-
 
         {/* Recent Activity & Quick Links */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-lg">
-            <h2 className="text-xl font-semibold text-gray-700 mb-5">Recent Activity (Mock Data)</h2>
+            <h2 className="text-xl font-semibold text-gray-700 mb-5">Recent Activity (Static Example)</h2>
             {recentActivity.length > 0 ? (
               <ul className="space-y-4">
                 {recentActivity.map((activity) => (
@@ -268,7 +209,13 @@ export default function SellerDashboard() {
           <div className="bg-white p-6 rounded-xl shadow-lg">
             <h2 className="text-xl font-semibold text-gray-700 mb-5">Quick Links</h2>
             <ul className="space-y-3">
-              {sellerLinks.filter(link => link.path !== "/seller/dashboard").map(link => ( 
+              {/* Links are now generated by Sidebar, this can be a different set of quick actions */}
+              {[
+                  { label: "View My Products", path: "/seller/products", icon: ArchiveBoxIcon },
+                  { label: "Add New Product", path: "/seller/products/add", icon: PlusCircleIcon },
+                  { label: "Manage Orders", path: "/seller/orders", icon: ShoppingCartIcon },
+                  { label: "Edit Profile", path: "/profile/edit", icon: UserCircleIcon },
+              ].map(link => ( 
                 <li key={link.path}>
                   <Link to={link.path} className="flex items-center gap-3 p-3 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-blue-600 transition-colors group">
                     {link.icon && <link.icon className="h-5 w-5 text-gray-400 group-hover:text-blue-500 transition-colors" />}

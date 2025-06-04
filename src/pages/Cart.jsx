@@ -3,65 +3,49 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuthContext } from '../context/AuthContext';
 import { useSignupSigninModal } from '../hooks/useSignupSigninModal';
-import { TrashIcon, PlusIcon, MinusIcon, TruckIcon, ShoppingBagIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
+import { TrashIcon, PlusIcon, MinusIcon, TruckIcon } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
-import { addBusinessDays, format } from 'date-fns'; 
-
-const API_BASE_URL = 'http://localhost:8080/api';
+import { addBusinessDays, format } from 'date-fns';
+import apiClient from '../services/api'; // For placing order
 
 // --- Delivery Options Configuration ---
-// IMPORTANT: The 'backendId' needs to map to the actual Long ID of the Delivery entity in your database.
+// This should ideally be fetched from backend or have IDs that map to backend Delivery IDs
 const deliveryOptionsData = [
   {
-    id: 'standard', // Frontend identifier
-    backendId: 1,   // Corresponding Long ID in the backend Delivery table
+    id: 'standard', // Frontend ID
+    backendId: 1,   // Assuming backend Delivery entity ID for "Standard" is 1
     label: 'Standard Shipping',
     durationText: '5-7 business days',
     fee: 0.00,
     calculateEstimatedDate: () => {
       const today = new Date();
-      const estMin = addBusinessDays(today, 5);
-      const estMax = addBusinessDays(today, 7);
-      return `${format(estMin, 'MMM d')} - ${format(estMax, 'MMM d, yy')}`;
+      return `${format(addBusinessDays(today, 5), 'MMM d')} - ${format(addBusinessDays(today, 7), 'MMM d, yy')}`;
     },
   },
   {
     id: 'express',
-    backendId: 2, 
+    backendId: 2, // Assuming backend Delivery entity ID for "Express" is 2
     label: 'Express Shipping',
     durationText: '2-3 business days',
     fee: 7.99,
     calculateEstimatedDate: () => {
       const today = new Date();
-      const estMin = addBusinessDays(today, 2);
-      const estMax = addBusinessDays(today, 3);
-      return `${format(estMin, 'MMM d')} - ${format(estMax, 'MMM d, yy')}`;
+      return `${format(addBusinessDays(today, 2), 'MMM d')} - ${format(addBusinessDays(today, 3), 'MMM d, yy')}`;
     },
   },
-  {
-    id: 'nextday',
-    backendId: 3,
-    label: 'Next Day Air',
-    durationText: '1 business day',
-    fee: 15.99,
-    calculateEstimatedDate: () => {
-      const today = new Date();
-      return format(addBusinessDays(today,1), 'MMM d, yy');
-    },
-  },
+  // Add more options and ensure backendId matches your database Delivery IDs
 ];
 // --- End Delivery Options ---
 
-export default function Cart() {
+export default function CartPage() { // Renamed from Cart to CartPage for clarity
   const {
-    cartItems,      // These are now CartResponseDto from backend via CartContext
-    removeFromCart, // Takes cartItemId (CartResponseDto.id)
-    updateQuantity, // Takes cartItemId (CartResponseDto.id)
-    clearCart,      // Interacts with backend via CartContext
+    cartItems, // These items now include `cartItemId` if from backend
+    removeFromCart,
+    updateQuantity,
+    clearCart,
     getCartTotal,
     getItemCount,
     isLoading: isCartLoading, // Loading state from CartContext
-    refreshCart, // Function to manually refresh cart from backend
   } = useCart();
 
   const { isAuthenticated, currentUser, userRole, isLoading: authIsLoading } = useAuthContext();
@@ -71,61 +55,67 @@ export default function Cart() {
   const [selectedDeliveryOptionId, setSelectedDeliveryOptionId] = useState(deliveryOptionsData[0].id);
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
 
-  // Refresh cart when component mounts and user is authenticated
-  useEffect(() => {
-    if (isAuthenticated && currentUser?.id) {
-      refreshCart();
-    }
-  }, [isAuthenticated, currentUser, refreshCart]);
+  const handleQuantityChange = (item, change) => {
+    const newQuantity = item.quantity + change;
+    // updateQuantity from CartContext now takes cartItemId (if authenticated) or productId (if guest)
+    // and the new quantity. It also handles removal if newQuantity <= 0.
+    // The CartContext's updateQuantity needs to know if it's operating on a guest cart item (using productId)
+    // or an authenticated user's cart item (using cartItemId).
+    // Our refactored CartContext handles this by checking isAuthenticated.
+    // For authenticated, it expects cartItemId. For guest, productId.
+    
+    const idToUpdate = isAuthenticated && item.cartItemId ? item.cartItemId : item.id;
+    const isCartItemId = isAuthenticated && item.cartItemId != null;
 
-
-  const handleQuantityChange = (cartItemId, productId, itemName, currentQuantity, change) => {
-    const newQuantity = currentQuantity + change;
     if (newQuantity > 0) {
-      updateQuantity(cartItemId, newQuantity, productId); // productId for guest cart fallback in context
+      updateQuantity(idToUpdate, newQuantity, isCartItemId);
     } else {
-      // updateQuantity in context handles removal if quantity <= 0, or call removeFromCart explicitly
-      removeFromCart(cartItemId, productId); // productId for guest cart fallback
-      toast.error(`${itemName} removed from cart.`);
+      removeFromCart(idToUpdate, isCartItemId); // removeFromCart also needs to know
+      toast.error(`${item.name} removed from cart.`);
     }
   };
 
-  const handleDirectQuantityInput = (cartItemId, productId, eventValue) => {
+  const handleDirectQuantityInput = (item, eventValue) => {
     const newQuantity = parseInt(eventValue, 10);
+    const idToUpdate = isAuthenticated && item.cartItemId ? item.cartItemId : item.id;
+    const isCartItemId = isAuthenticated && item.cartItemId != null;
+
     if (!isNaN(newQuantity) && newQuantity >= 1) {
-        updateQuantity(cartItemId, newQuantity, productId);
+        updateQuantity(idToUpdate, newQuantity, isCartItemId);
     }
+    // Blur handler will reset if invalid
   };
 
-  const handleBlurQuantityInput = (cartItemId, productId, eventValue) => {
+  const handleBlurQuantityInput = (item, eventValue) => {
+    const idToUpdate = isAuthenticated && item.cartItemId ? item.cartItemId : item.id;
+    const isCartItemId = isAuthenticated && item.cartItemId != null;
     if (eventValue === "" || parseInt(eventValue, 10) < 1 || isNaN(parseInt(eventValue,10))) {
-        updateQuantity(cartItemId, 1, productId); 
+        updateQuantity(idToUpdate, 1, isCartItemId); 
         toast.error("Quantity reset to 1.", { duration: 2000 });
     }
   };
   
-  const handleRemoveItem = (cartItemId, productId, itemName) => {
-    removeFromCart(cartItemId, productId); // Pass both for context to handle auth/guest
-    // Toast is now handled within CartContext for backend operations
+  const handleRemoveItem = (item) => {
+    const idToRemove = isAuthenticated && item.cartItemId ? item.cartItemId : item.id;
+    const isCartItemId = isAuthenticated && item.cartItemId != null;
+    removeFromCart(idToRemove, isCartItemId);
+    // Toast is now handled within CartContext's removeFromCart
   };
 
   const handleClearCart = () => {
-    clearCart(); // clearCart in context handles backend interaction
-    // Toast is handled within CartContext
+    clearCart(); // clearCart in CartContext handles API call and toasts
   }
 
   const selectedDeliveryOption = deliveryOptionsData.find(opt => opt.id === selectedDeliveryOptionId) || deliveryOptionsData[0];
   const deliveryFee = selectedDeliveryOption.fee;
-  const subtotal = getCartTotal(); // From CartContext, based on backend-synced items
+  const subtotal = getCartTotal();
   const grandTotal = subtotal + deliveryFee;
 
   const handlePlaceOrder = async () => {
-    if (!isAuthenticated || !currentUser || userRole !== 'Buyer') {
+    if (!isAuthenticated || !currentUser || userRole !== 'BUYER') {
       toast.error("Please sign in as a Buyer to place an order.");
-      if (!isAuthenticated) {
-        switchToTab("signin");
-        openModal();
-      }
+      switchToTab("signin");
+      openModal();
       return;
     }
     if (cartItems.length === 0) {
@@ -134,75 +124,55 @@ export default function Cart() {
     }
 
     setIsPlacingOrder(true);
-    const loadingToastId = toast.loading("Placing your order...");
-
-    const checkoutPayload = {
-      userId: currentUser.id,
-      deliveryId: selectedDeliveryOption.backendId, // Use the mapped backend ID
-    };
-
     try {
-      const response = await fetch(`${API_BASE_URL}/orders/checkout`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          // Session cookie handles authentication
-        },
-        body: JSON.stringify(checkoutPayload),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ message: "Failed to place order." }));
-        throw new Error(errorData.message || `Order placement failed: ${response.statusText}`);
-      }
+      // Backend /api/orders/checkout expects userId and deliveryId (Long)
+      const checkoutPayload = {
+        userId: currentUser.id,
+        deliveryId: selectedDeliveryOption.backendId, // Use the mapped backendId
+      };
       
-      // Backend returns List<Order> which are the newly created orders
-      // const newOrdersData = await response.json(); 
+      const response = await apiClient.post('/orders/checkout', checkoutPayload);
+      // Backend returns List<OrderResponseDto>
       
-      toast.success("Order placed successfully!", { id: loadingToastId });
-      await clearCart(); // Clear backend cart via context
-      navigate('/buyer/orders'); // Navigate to buyer's orders page
-
+      toast.success(`Order placed successfully! ${response.data.length} order(s) created.`);
+      clearCart(); // This will now call the backend to clear the cart for the user
+      navigate('/buyer/orders'); // Navigate to order history page
     } catch (error) {
-      console.error("Cart: Error placing order:", error);
-      toast.error(error.message || "Failed to place order. Please try again.", { id: loadingToastId });
+      console.error("Error placing order:", error.response?.data || error.message);
+      toast.error(error.response?.data?.message || "Failed to place order. Please try again.");
     } finally {
       setIsPlacingOrder(false);
     }
   };
 
-  const emptyCartMinHeight = "min-h-[calc(100vh-16rem)] sm:min-h-[calc(100vh-12rem)]";
+  const isLoadingPage = authIsLoading || isCartLoading; // Combined loading state
 
-  if (authIsLoading || (isAuthenticated && isCartLoading && cartItems.length === 0)) { // Show loading if auth or cart is loading initially
+  if (isLoadingPage && cartItems.length === 0) { // Show full page loader if cart is also initially loading
     return (
-      <div className={`flex flex-col items-center justify-center ${emptyCartMinHeight} text-center px-4 py-8 bg-gray-50`}>
+      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-12rem)] text-center px-4 py-8 bg-gray-50">
         <svg className="animate-spin h-10 w-10 text-blue-600 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
         </svg>
-        <p className="text-gray-500 text-lg">Loading Cart...</p>
+        <p className="text-gray-500 text-lg">Loading Your Cart...</p>
       </div>
     );
   }
 
-  if (!isCartLoading && cartItems.length === 0) {
+  if (cartItems.length === 0) {
     return (
-      <div className={`flex flex-col items-center justify-center ${emptyCartMinHeight} text-center px-4 py-8`}>
-        <ShoppingBagIcon className="w-24 h-24 text-gray-300 mb-8" />
+      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-12rem)] text-center px-4 py-8">
+        <img src="/assets/empty-cart.png" alt="Empty cart" className="w-48 sm:w-56 mb-8" />
         <h2 className="text-2xl font-semibold mb-3 text-gray-700">Your Cart is Empty!</h2>
-        {isAuthenticated && userRole === 'Buyer' ? (
-            <p className="text-gray-600 mb-6 max-w-md">Looks like you haven't added anything yet. Explore our products and find something you love!</p>
-        ) : !isAuthenticated ? (
-            <p className="text-gray-600 mb-6 max-w-md">Sign in to see your saved items, or start shopping to fill it up!</p>
-        ) : ( 
-            <p className="text-gray-600 mb-6 max-w-md">Your cart is currently empty. Happy Browsing!</p>
-        )}
+        <p className="text-gray-600 mb-6 max-w-md">
+          {isAuthenticated ? "Add some products to get started." : "Sign in to see your saved items or start shopping!"}
+        </p>
         <div className="flex flex-col sm:flex-row gap-4 items-center">
             <Link 
                 to="/products" 
                 className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-300 font-semibold text-md shadow-md hover:shadow-lg"
             >
-                Start Shopping
+                Shop Products
             </Link>
             {!isAuthenticated && (
                 <button 
@@ -222,7 +192,7 @@ export default function Cart() {
       <div className="max-w-7xl mx-auto">
         <header className="mb-8 text-center">
           <h1 className="text-3xl sm:text-4xl font-bold text-gray-800">Your Shopping Cart</h1>
-          <p className="text-gray-600 mt-2">Review your items, select delivery, and proceed to checkout.</p>
+          <p className="text-gray-600 mt-2">Review your items and proceed to checkout.</p>
         </header>
 
         <div className="flex flex-col lg:flex-row lg:gap-8 xl:gap-12">
@@ -233,44 +203,49 @@ export default function Cart() {
                 {cartItems.length > 0 && (
                     <button 
                         onClick={handleClearCart} 
-                        disabled={isPlacingOrder || isCartLoading}
+                        disabled={isCartLoading || isPlacingOrder}
                         className="px-4 py-1.5 border border-red-500 text-red-600 text-xs font-medium rounded-md hover:bg-red-500 hover:text-white transition-all duration-200 disabled:opacity-50"
                     >
                     Clear Cart
                     </button>
                 )}
               </div>
-              {isCartLoading && cartItems.length === 0 ? (
-                <p className="p-6 text-center text-gray-500">Refreshing cart items...</p>
-              ) : (
                 <ul className="divide-y divide-gray-200">
-                  {cartItems.map((item) => ( // item is CartResponseDto
-                    <li key={item.id} className="flex flex-col sm:flex-row items-start sm:items-center p-4 sm:p-6 gap-4">
+                  {cartItems.map((item) => ( // item.id is productId for guest, item.productId for auth user if mapped directly from backend DTO
+                                            // The mapBackendCartItem in CartContext standardizes this to item.id = productId
+                    <li key={item.cartItemId || item.id} className="flex flex-col sm:flex-row items-start sm:items-center p-4 sm:p-6 gap-4">
                       <img 
-                        src={item.photoUrl || '/assets/placeholder.png'} // From CartResponseDto
-                        alt={item.productName} 
+                        src={item.photoUrl || '/assets/placeholder.png'} 
+                        alt={item.name} 
                         className="w-28 h-28 sm:w-24 sm:h-24 object-cover rounded-lg flex-shrink-0 border border-gray-200 bg-gray-50" 
                         onError={(e) => { e.target.onerror = null; e.target.src = '/assets/placeholder.png'; }}
                       />
                       <div className="flex-grow text-left">
-                        <Link to={`/products/${item.productId}`} className="hover:text-blue-600 transition-colors">
-                          <h3 className="text-lg font-semibold text-gray-800 leading-tight">{item.productName}</h3>
+                        <Link to={`/products/${item.id}`} className="hover:text-blue-600 transition-colors">
+                          <h3 className="text-lg font-semibold text-gray-800 leading-tight">{item.name}</h3>
                         </Link>
                         <p className="text-sm text-gray-500 mt-0.5">{item.category}</p>
                         <p className="text-sm text-blue-600 font-medium mt-0.5">
-                          Price: ${item.price ? item.price.toFixed(2) : '0.00'}
+                          Price: ${item.price ? item.price.toFixed(2) : 'N/A'}
                         </p>
                         <div className="flex items-center gap-2 mt-2">
-                            <button onClick={() => handleQuantityChange(item.id, item.productId, item.productName, item.quantity, -1)} className="p-1 rounded-md text-gray-500 hover:text-blue-600 hover:bg-gray-100 transition-colors" aria-label="Decrease quantity">
+                            <button 
+                                onClick={() => handleQuantityChange(item, -1)} 
+                                disabled={isCartLoading || isPlacingOrder}
+                                className="p-1 rounded-md text-gray-500 hover:text-blue-600 hover:bg-gray-100 transition-colors disabled:opacity-50" aria-label="Decrease quantity">
                             <MinusIcon className="h-4 w-4" />
                             </button>
                             <input type="number" value={item.quantity}
-                            onChange={(e) => handleDirectQuantityInput(item.id, item.productId, e.target.value)}
-                            onBlur={(e) => handleBlurQuantityInput(item.id, item.productId, e.target.value)}
-                            className="w-12 text-center border-gray-300 rounded-md p-1 text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent"
-                            aria-label={`Quantity for ${item.productName}`}
+                                onChange={(e) => handleDirectQuantityInput(item, e.target.value)}
+                                onBlur={(e) => handleBlurQuantityInput(item, e.target.value)}
+                                disabled={isCartLoading || isPlacingOrder}
+                                className="w-12 text-center border-gray-300 rounded-md p-1 text-sm focus:ring-1 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
+                                aria-label={`Quantity for ${item.name}`}
                             />
-                            <button onClick={() => handleQuantityChange(item.id, item.productId, item.productName, item.quantity, 1)} className="p-1 rounded-md text-gray-500 hover:text-blue-600 hover:bg-gray-100 transition-colors" aria-label="Increase quantity">
+                            <button 
+                                onClick={() => handleQuantityChange(item, 1)} 
+                                disabled={isCartLoading || isPlacingOrder}
+                                className="p-1 rounded-md text-gray-500 hover:text-blue-600 hover:bg-gray-100 transition-colors disabled:opacity-50" aria-label="Increase quantity">
                             <PlusIcon className="h-4 w-4" />
                             </button>
                         </div>
@@ -279,17 +254,20 @@ export default function Cart() {
                         <p className="text-md font-semibold text-gray-800 mb-2 sm:mb-4">
                           ${(item.price * item.quantity).toFixed(2)}
                         </p>
-                        <button onClick={() => handleRemoveItem(item.id, item.productId, item.productName)} className="p-1.5 rounded-md text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors text-xs flex items-center gap-1" aria-label={`Remove ${item.productName} from cart`}>
+                        <button 
+                            onClick={() => handleRemoveItem(item)} 
+                            disabled={isCartLoading || isPlacingOrder}
+                            className="p-1.5 rounded-md text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors text-xs flex items-center gap-1 disabled:opacity-50" aria-label={`Remove ${item.name} from cart`}>
                           <TrashIcon className="h-4 w-4" /> Remove
                         </button>
                       </div>
                     </li>
                   ))}
                 </ul>
-              )}
             </div>
           </div>
 
+          {/* Right Column: Delivery Options & Order Summary */}
           <div className="lg:w-1/3 w-full lg:sticky lg:top-28 self-start">
             <div className="bg-white shadow-lg rounded-xl p-5 sm:p-6 space-y-6">
               <div>
@@ -306,7 +284,10 @@ export default function Cart() {
                         ${selectedDeliveryOptionId === option.id ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-400' : 'border-gray-200 bg-white hover:border-gray-300'}`}
                     >
                       <input
-                        type="radio" id={`delivery-${option.id}`} name="deliveryOption" value={option.id}
+                        type="radio"
+                        id={`delivery-${option.id}`}
+                        name="deliveryOption"
+                        value={option.id}
                         checked={selectedDeliveryOptionId === option.id}
                         onChange={() => setSelectedDeliveryOptionId(option.id)}
                         className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500 mr-3"
@@ -345,18 +326,18 @@ export default function Cart() {
               </div>
 
               <div className="pt-4 border-t border-gray-200">
-                {(!isAuthenticated || (isAuthenticated && userRole === 'Buyer')) && (
+                {(!isAuthenticated || (isAuthenticated && userRole === 'BUYER')) && (
                   <button
                     onClick={handlePlaceOrder}
-                    disabled={cartItems.length === 0 || authIsLoading || isPlacingOrder || isCartLoading}
+                    disabled={cartItems.length === 0 || authIsLoading || isCartLoading || isPlacingOrder}
                     className={`w-full px-6 py-3 rounded-lg text-white font-semibold text-md transition-colors duration-300 shadow-md hover:shadow-lg flex items-center justify-center gap-2 ${
-                      cartItems.length === 0 || authIsLoading || isPlacingOrder || isCartLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'
+                      cartItems.length === 0 || authIsLoading || isCartLoading || isPlacingOrder ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'
                     }`}
                   >
-                    {isPlacingOrder ? "Placing Order..." : "Proceed to Checkout"}
+                    {isPlacingOrder ? 'Placing Order...' : 'Proceed to Checkout'}
                   </button>
                 )}
-                {isAuthenticated && userRole === 'Seller' && cartItems.length > 0 && (
+                {isAuthenticated && userRole === 'SELLER' && cartItems.length > 0 && (
                   <div className="w-full text-center">
                       <p className="text-sm text-orange-600 p-3 bg-orange-50 rounded-md border border-orange-200">
                           Checkout is available for Buyer accounts.
