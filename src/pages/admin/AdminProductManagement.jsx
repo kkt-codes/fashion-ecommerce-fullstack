@@ -1,224 +1,241 @@
-import React, { useEffect, useState } from 'react';
-import Sidebar from '../../components/Sidebar';
-import apiClient from '../../services/api';
-import toast from 'react-hot-toast';
+import React, { useEffect, useState, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import {
-  ArchiveBoxIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
   PencilSquareIcon,
   TrashIcon,
-  ExclamationTriangleIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  XMarkIcon,
+  ArchiveBoxIcon
 } from '@heroicons/react/24/outline';
+import toast from 'react-hot-toast';
+
+import Sidebar from '../../components/Sidebar';
+import { getProducts, deleteProduct, updateProduct, getProductCategories } from '../../services/api';
 
 const PRODUCTS_PER_PAGE = 12;
 
-export default function AdminProductManagement() {
-  const [products, setProducts] = useState([]);
-  const [totalProducts, setTotalProducts] = useState(0);
+// Modal for an Admin to edit any product's details
+const EditProductModal = ({ productId, onClose, onProductUpdate }) => {
+    const [formData, setFormData] = useState({ name: '', description: '', price: '', category: '' });
+    const [categories, setCategories] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    useEffect(() => {
+        const fetchProductAndCategories = async () => {
+            setIsLoading(true);
+            try {
+                const [productRes, categoriesRes] = await Promise.all([
+                    getProductById(productId),
+                    getProductCategories()
+                ]);
+                const productData = productRes.data;
+                setFormData({
+                    name: productData.name || '',
+                    description: productData.description || '',
+                    price: productData.price || '',
+                    category: productData.category || '',
+                });
+                setCategories(categoriesRes.data || []);
+            } catch (error) {
+                toast.error("Failed to load product details.");
+                onClose();
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        fetchProductAndCategories();
+    }, [productId, onClose]);
+
+    const handleChange = (e) => {
+        setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    };
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setIsSubmitting(true);
+        const toastId = toast.loading("Updating product...");
+        try {
+            await updateProduct(productId, formData);
+            toast.success("Product updated successfully!", { id: toastId });
+            onProductUpdate();
+            onClose();
+        } catch (error) {
+            toast.error(error.response?.data?.message || "Failed to update product.", { id: toastId });
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-lg m-4">
+                <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-xl font-semibold">Edit Product</h2>
+                    <button onClick={onClose} className="p-1 rounded-full hover:bg-gray-200"><XMarkIcon className="h-6 w-6" /></button>
+                </div>
+                {isLoading ? <p>Loading details...</p> : (
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">Name</label>
+                            <input type="text" name="name" value={formData.name} onChange={handleChange} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm"/>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">Description</label>
+                            <textarea name="description" value={formData.description} onChange={handleChange} rows="3" className="mt-1 block w-full border-gray-300 rounded-md shadow-sm"/>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">Price</label>
+                            <input type="number" name="price" value={formData.price} onChange={handleChange} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm"/>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">Category</label>
+                            <select name="category" value={formData.category} onChange={handleChange} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm">
+                                {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                            </select>
+                        </div>
+                        <div className="mt-6 flex justify-end gap-3">
+                            <button type="button" onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Cancel</button>
+                            <button type="submit" disabled={isSubmitting} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400">
+                                {isSubmitting ? "Saving..." : "Save Changes"}
+                            </button>
+                        </div>
+                    </form>
+                )}
+            </div>
+        </div>
+    );
+};
+
+
+export default function AdminProductManagementPage() {
+  const [productsData, setProductsData] = useState({ content: [], totalPages: 0 });
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [currentPage, setCurrentPage] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [pageError, setPageError] = useState(null);
-  const [processingProductId, setProcessingProductId] = useState(null);
 
-  const fetchProducts = async (page = 0) => {
-    setLoading(true);
-    setPageError(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [selectedProductId, setSelectedProductId] = useState(null);
+
+  const fetchProducts = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
     try {
-      const response = await apiClient.get(`/admin/products?page=${page}&size=${PRODUCTS_PER_PAGE}&sort=id,DESC`);
-      setProducts(response.data?.content || []);
-      setTotalProducts(response.data?.totalElements || 0);
-      setCurrentPage(response.data?.number || 0);
-    } catch (error) {
-      const errorMsg = error.response?.data?.message || 'Failed to load products.';
-      setPageError(errorMsg);
-      toast.error(errorMsg);
-      setProducts([]);
+      const params = { page: currentPage, size: PRODUCTS_PER_PAGE, sort: "id,DESC" };
+      const { data } = await getProducts(params); // Using the generic getProducts endpoint
+      setProductsData(data);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to load products.');
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchProducts(currentPage);
   }, [currentPage]);
 
-  const paginate = (page) => {
-    if (page >= 0 && page < Math.ceil(totalProducts / PRODUCTS_PER_PAGE)) {
-      setCurrentPage(page);
-    }
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts]);
+  
+  const handleEditProduct = (productId) => {
+    setSelectedProductId(productId);
+    setIsEditModalOpen(true);
   };
 
   const handleDeleteProduct = (productId, productName) => {
-    toast(
-      (t) => (
-        <div className="max-w-xs p-4 bg-white rounded shadow-md flex flex-col gap-3">
-          <p className="text-sm font-semibold text-gray-800">Delete product "{productName}"?</p>
-          <p className="text-xs text-gray-600">This action cannot be undone.</p>
-          <div className="flex gap-2">
-            <button
-              onClick={async () => {
-                toast.dismiss(t.id);
-                setProcessingProductId(productId);
-                try {
-                  await apiClient.delete(`/admin/products/${productId}`);
-                  toast.success(`Product "${productName}" deleted.`);
-                  if (products.length === 1 && currentPage > 0) {
-                    setCurrentPage(prev => prev - 1);
-                  } else {
-                    fetchProducts(currentPage);
-                  }
-                } catch (error) {
-                  console.error('Delete product failed:', error.response?.data || error.message);
-                  toast.error(`Failed to delete "${productName}". Please try again.`);
-                } finally {
-                  setProcessingProductId(null);
-                }
-              }}
-              className="flex-1 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 transition"
-            >
-              Delete
-            </button>
-            <button
-              onClick={() => toast.dismiss(t.id)}
-              className="flex-1 py-1.5 bg-gray-200 rounded hover:bg-gray-300 transition"
-            >
-              Cancel
-            </button>
-          </div>
+    toast((t) => (
+      <div className="p-4 bg-white rounded shadow-md">
+        <p className="font-semibold">Delete product "{productName}"?</p>
+        <div className="flex gap-2 mt-3">
+          <button
+            onClick={async () => {
+              toast.dismiss(t.id);
+              const deleteToast = toast.loading("Deleting product...");
+              try {
+                await deleteProduct(productId);
+                toast.success(`Product "${productName}" deleted.`, { id: deleteToast });
+                fetchProducts();
+              } catch (err) {
+                toast.error('Failed to delete product.', { id: deleteToast });
+              }
+            }}
+            className="px-4 py-1.5 bg-red-600 text-white rounded hover:bg-red-700"
+          >Delete</button>
+          <button onClick={() => toast.dismiss(t.id)} className="px-4 py-1.5 bg-gray-200 rounded hover:bg-gray-300">Cancel</button>
         </div>
-      ),
-      { duration: 60000, position: 'top-center' }
-    );
+      </div>
+    ), { duration: 10000 });
   };
-
+  
   return (
     <div className="flex min-h-screen bg-gray-100">
-      <Sidebar />
-      <main className="flex-1 p-6 sm:p-8 max-w-6xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6 text-gray-800">Product Management</h1>
-
-        {pageError && (
-          <div className="p-4 mb-6 bg-red-100 text-red-700 rounded shadow text-center">
-            {pageError}
-          </div>
+        {isEditModalOpen && selectedProductId && (
+            <EditProductModal 
+                productId={selectedProductId}
+                onClose={() => setIsEditModalOpen(false)}
+                onProductUpdate={() => {
+                    setIsEditModalOpen(false);
+                    fetchProducts();
+                }}
+            />
         )}
+      <Sidebar />
+      <main className="flex-1 p-6 sm:p-8">
+        <header className="mb-6">
+            <h1 className="text-3xl font-bold text-gray-800">Product Management</h1>
+            <p className="text-sm text-gray-500 mt-1">View, edit, or delete any product on the platform.</p>
+        </header>
 
-        {loading && products.length === 0 ? (
-          <p className="text-center text-gray-600 animate-pulse">Loading products...</p>
-        ) : products.length === 0 ? (
-          <p className="text-center text-gray-500">No products found.</p>
-        ) : (
-          <>
-            <table className="min-w-full table-auto border-collapse border border-gray-300 rounded-md overflow-hidden shadow-sm bg-white">
-              <thead className="bg-gray-50 border-b border-gray-300">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase border-r border-gray-300">ID</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase border-r border-gray-300">Photo</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase border-r border-gray-300">Name</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase border-r border-gray-300">Category</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase border-r border-gray-300">Price</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase border-r border-gray-300">Seller</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {products.map((product) => (
-                  <tr key={product.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-700 border-r border-gray-300" title={String(product.id)}>
-                      #{String(product.id).slice(-8)}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap border-r border-gray-300">
-                      <img
-                        src={product.photoUrl || '/assets/placeholder.png'}
-                        alt={product.name}
-                        className="h-10 w-10 object-cover rounded"
-                        onError={(e) => { e.target.onerror = null; e.target.src = '/assets/placeholder.png'; }}
-                      />
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 border-r border-gray-300 truncate max-w-xs" title={product.name}>
-                      {product.name || "Unnamed Product"}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700 border-r border-gray-300 truncate max-w-xs" title={product.category}>
-                      {product.category || "Uncategorized"}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-blue-600 border-r border-gray-300">
-                      ${product.price !== undefined ? product.price.toFixed(2) : "N/A"}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700 border-r border-gray-300 truncate max-w-xs" title={product.sellerName || "Unknown Seller"}>
-                      {product.sellerName || "Unknown Seller"}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-center text-sm space-x-2">
-                      <button
-                        onClick={() => toast('Edit functionality not implemented.')}
-                        className="text-green-600 hover:text-green-800"
-                        aria-label="Edit product"
-                        title="Edit product (not implemented)"
-                      >
-                        <PencilSquareIcon className="h-5 w-5 inline" />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteProduct(product.id, product.name)}
-                        disabled={processingProductId === product.id}
-                        aria-label="Delete product"
-                        title="Delete product"
-                        className="text-red-600 hover:text-red-800 disabled:opacity-50"
-                      >
-                        {processingProductId === product.id ? (
-                          <svg className="animate-spin h-5 w-5 inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                          </svg>
-                        ) : (
-                          <TrashIcon className="h-5 w-5 inline" />
-                        )}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            {totalProducts > PRODUCTS_PER_PAGE && (
-              <nav className="flex justify-between items-center mt-6 px-2" aria-label="Pagination">
-                <button
-                  onClick={() => paginate(0)}
-                  disabled={currentPage === 0 || loading}
-                  className="px-3 py-1 text-sm rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  First
-                </button>
-                <button
-                  onClick={() => paginate(currentPage - 1)}
-                  disabled={currentPage === 0 || loading}
-                  className="px-4 py-1 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <ChevronLeftIcon className="h-5 w-5" />
-                </button>
-                <span className="text-sm text-gray-700">
-                  Page <span className="font-semibold">{currentPage + 1}</span> of{' '}
-                  <span className="font-semibold">{Math.ceil(totalProducts / PRODUCTS_PER_PAGE)}</span>
-                </span>
-                <button
-                  onClick={() => paginate(currentPage + 1)}
-                  disabled={currentPage >= Math.ceil(totalProducts / PRODUCTS_PER_PAGE) - 1 || loading}
-                  className="px-4 py-1 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <ChevronRightIcon className="h-5 w-5" />
-                </button>
-                <button
-                  onClick={() => paginate(Math.ceil(totalProducts / PRODUCTS_PER_PAGE) - 1)}
-                  disabled={currentPage >= Math.ceil(totalProducts / PRODUCTS_PER_PAGE) - 1 || loading}
-                  className="px-3 py-1 text-sm rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Last
-                </button>
-              </nav>
-            )}
-          </>
+        {isLoading && productsData.content.length === 0 ? <p>Loading products...</p> :
+        error ? <p className="text-red-500">{error}</p> :
+        (
+            <div className="bg-white rounded-lg shadow overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                        <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Seller ID</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Price</th>
+                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                        {productsData.content.map((product) => (
+                            <tr key={product.id}>
+                                <td className="px-6 py-4 whitespace-nowrap">
+                                    <div className="flex items-center">
+                                        <div className="flex-shrink-0 h-10 w-10">
+                                            <img className="h-10 w-10 rounded-md object-cover" src={product.photoUrl || '/assets/placeholder.png'} alt={product.name} />
+                                        </div>
+                                        <div className="ml-4">
+                                            <div className="text-sm font-medium text-gray-900">{product.name}</div>
+                                            <div className="text-sm text-gray-500">ID: {product.id}</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500" title={product.sellerId}>{product.sellerId.substring(0, 8)}...</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{product.category}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold">${product.price.toFixed(2)}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
+                                    <button onClick={() => handleEditProduct(product.id)} className="text-indigo-600 hover:text-indigo-900">Edit</button>
+                                    <button onClick={() => handleDeleteProduct(product.id, product.name)} className="text-red-600 hover:text-red-900">Delete</button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+                 {productsData.totalPages > 1 && (
+                    <div className="px-6 py-3 flex justify-between items-center">
+                        <span className="text-sm text-gray-700">Page {currentPage + 1} of {productsData.totalPages}</span>
+                        <div className="space-x-1">
+                            <button onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 0} className="px-3 py-1 border rounded-md disabled:opacity-50"><ChevronLeftIcon className="h-4 w-4"/></button>
+                            <button onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage >= productsData.totalPages - 1} className="px-3 py-1 border rounded-md disabled:opacity-50"><ChevronRightIcon className="h-4 w-4"/></button>
+                        </div>
+                    </div>
+                )}
+            </div>
         )}
       </main>
     </div>
   );
 }
-

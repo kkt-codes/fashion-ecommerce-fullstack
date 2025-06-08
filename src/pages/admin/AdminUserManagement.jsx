@@ -1,199 +1,231 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import Sidebar from '../../components/Sidebar';
-import apiClient from '../../services/api';
-import toast from 'react-hot-toast';
 import {
   PencilSquareIcon,
   TrashIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  UserIcon,
+  XMarkIcon,
+  UserPlusIcon,
 } from '@heroicons/react/24/outline';
+import toast from 'react-hot-toast';
 
-const USERS_PER_PAGE = 12;
+import { useAuth } from '../../context/AuthContext';
+import { getAllUsers, deleteUser, updateUser } from '../../services/api';
+
+const USERS_PER_PAGE = 15;
+
+// Modal for Editing a User
+const EditUserModal = ({ user, onClose, onUserUpdate }) => {
+    const [formData, setFormData] = useState({
+        firstName: user.firstName || '',
+        lastName: user.lastName || '',
+        email: user.email || '',
+        role: user.role || 'BUYER',
+    });
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const handleChange = (e) => {
+        const { name, value } = e.target;
+        setFormData(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setIsSubmitting(true);
+        const toastId = toast.loading("Updating user...");
+        try {
+            await updateUser(user.id, formData);
+            toast.success("User updated successfully!", { id: toastId });
+            onUserUpdate(); // Callback to refresh the user list
+            onClose();
+        } catch (error) {
+            toast.error(error.response?.data?.message || "Failed to update user.", { id: toastId });
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-lg m-4">
+                <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-xl font-semibold">Edit User: {user.firstName} {user.lastName}</h2>
+                    <button onClick={onClose} className="p-1 rounded-full hover:bg-gray-200"><XMarkIcon className="h-6 w-6" /></button>
+                </div>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">First Name</label>
+                        <input type="text" name="firstName" value={formData.firstName} onChange={handleChange} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm"/>
+                    </div>
+                     <div>
+                        <label className="block text-sm font-medium text-gray-700">Last Name</label>
+                        <input type="text" name="lastName" value={formData.lastName} onChange={handleChange} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm"/>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">Email</label>
+                        <input type="email" name="email" value={formData.email} onChange={handleChange} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm"/>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">Role</label>
+                        <select name="role" value={formData.role} onChange={handleChange} className="mt-1 block w-full border-gray-300 rounded-md shadow-sm">
+                            <option value="BUYER">Buyer</option>
+                            <option value="SELLER">Seller</option>
+                            <option value="ADMIN">Admin</option>
+                        </select>
+                    </div>
+                    <div className="mt-6 flex justify-end gap-3">
+                        <button type="button" onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Cancel</button>
+                        <button type="submit" disabled={isSubmitting} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400">
+                            {isSubmitting ? "Saving..." : "Save Changes"}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
 
 export default function AdminUserManagementPage() {
-  const [users, setUsers] = useState([]);
-  const [totalUsers, setTotalUsers] = useState(0);
-  const [currentPage, setCurrentPage] = useState(0);
-  const [pageError, setPageError] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [deletingUserId, setDeletingUserId] = useState(null);
+    const [usersData, setUsersData] = useState({ content: [], totalPages: 0 });
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [currentPage, setCurrentPage] = useState(0);
 
-  const fetchUsers = async (page = 0) => {
-    setLoading(true);
-    setPageError(null);
-    try {
-      // Backend endpoint: GET /admin/users?page={page}&size={USERS_PER_PAGE}&sort=id,ASC
-      const response = await apiClient.get(
-        `/admin/users?page=${page}&size=${USERS_PER_PAGE}&sort=id,ASC`
-      );
-      setUsers(response.data?.content || []);
-      setTotalUsers(response.data?.totalElements || 0);
-      setCurrentPage(response.data?.number || 0);
-    } catch (error) {
-      const errorMsg = error.response?.data?.message || 'Failed to load users.';
-      setPageError(errorMsg);
-      toast.error(errorMsg);
-      setUsers([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [selectedUser, setSelectedUser] = useState(null);
+    const { currentUser } = useAuth();
 
-  useEffect(() => {
-    fetchUsers(currentPage);
-  }, [currentPage]);
 
-  const paginate = (newPage) => {
-    if (newPage >= 0 && newPage < Math.ceil(totalUsers / USERS_PER_PAGE)) {
-      setCurrentPage(newPage);
-    }
-  };
+    const fetchUsers = useCallback(async () => {
+        setIsLoading(true);
+        setError(null);
+        try {
+            const params = { page: currentPage, size: USERS_PER_PAGE, sort: "id,ASC" };
+            const { data } = await getAllUsers(params);
+            // Check if the response is a proper pagination object
+            if (data && data.content) {
+                setUsersData(data);
+            } 
+            // Handle if the response is just a simple array
+            else if (Array.isArray(data)) {
+                // This prevents the crash but means pagination info is missing from the backend.
+                // We'll wrap the array in the expected structure.
+                setUsersData({ content: data, totalPages: 1 });
+            } 
+            // Handle other unexpected formats
+            else {
+                setUsersData({ content: [], totalPages: 0 });
+            }
+        } catch (err) {
+            setError(err.response?.data?.message || 'Failed to load users.');
+            // Ensure state is clean on error to prevent render issues
+            setUsersData({ content: [], totalPages: 0 });
+        } finally {
+            setIsLoading(false);
+        }
+    }, [currentPage]);
 
-  const handleDeleteUser = (userId, userName) => {
-    toast(
-      (t) => (
-        <div className="p-4 bg-white rounded shadow-md max-w-xs flex flex-col gap-3">
-          <p className="text-sm font-semibold text-gray-800">Delete user "{userName}"?</p>
-          <div className="flex gap-2">
-            <button
-              onClick={async () => {
-                toast.dismiss(t.id);
-                setDeletingUserId(userId);
-                try {
-                  await apiClient.delete(`/admin/users/${userId}`);
-                  toast.success(`User "${userName}" deleted.`);
-                  // Refetch users after delete
-                  fetchUsers(currentPage);
-                } catch (err) {
-                  console.error('Delete user failed:', err.response?.data || err.message);
-                  toast.error('Failed to delete user. Please try again.');
-                } finally {
-                  setDeletingUserId(null);
-                }
-              }}
-              className="flex-1 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 transition"
-            >
-              Delete
-            </button>
-            <button
-              onClick={() => toast.dismiss(t.id)}
-              className="flex-1 py-1.5 bg-gray-200 rounded hover:bg-gray-300 transition"
-            >
-              Cancel
-            </button>
-          </div>
+    useEffect(() => {
+        fetchUsers();
+    }, [fetchUsers]);
+
+    const handleEditUser = (user) => {
+        setSelectedUser(user);
+        setIsEditModalOpen(true);
+    };
+
+    const handleDeleteUser = (userId, userName) => {
+        if (userId === currentUser?.id) {
+            toast.error("You cannot delete your own admin account.");
+            return;
+        }
+        toast((t) => (
+            <div className="p-4 bg-white rounded shadow-md">
+                <p className="font-semibold">Delete user "{userName}"?</p>
+                <div className="flex gap-2 mt-3">
+                    <button
+                        onClick={async () => {
+                            toast.dismiss(t.id);
+                            const deleteToast = toast.loading("Deleting user...");
+                            try {
+                                await deleteUser(userId);
+                                toast.success(`User "${userName}" deleted.`, { id: deleteToast });
+                                fetchUsers();
+                            } catch (err) {
+                                toast.error('Failed to delete user.', { id: deleteToast });
+                            }
+                        }}
+                        className="px-4 py-1.5 bg-red-600 text-white rounded hover:bg-red-700"
+                    >Delete</button>
+                    <button onClick={() => toast.dismiss(t.id)} className="px-4 py-1.5 bg-gray-200 rounded hover:bg-gray-300">Cancel</button>
+                </div>
+            </div>
+        ), { duration: 10000 });
+    };
+
+    return (
+        <div className="flex min-h-screen bg-gray-100">
+            {isEditModalOpen && selectedUser && (
+                <EditUserModal 
+                    user={selectedUser} 
+                    onClose={() => setIsEditModalOpen(false)} 
+                    onUserUpdate={() => {
+                        setIsEditModalOpen(false);
+                        fetchUsers();
+                    }}
+                />
+            )}
+            <Sidebar />
+            <main className="flex-1 p-6 sm:p-8">
+                <header className="flex justify-between items-center mb-6">
+                    <h1 className="text-3xl font-bold text-gray-800">User Management</h1>
+                    {/* Placeholder for a "Create User" button */}
+                    <button className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg shadow hover:bg-blue-700">
+                        <UserPlusIcon className="h-5 w-5" /> Create User
+                    </button>
+                </header>
+
+                {isLoading && usersData.content.length === 0 ? <p>Loading users...</p> :
+                error ? <p className="text-red-500">{error}</p> :
+                (
+                    <div className="bg-white rounded-lg shadow overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {usersData.content.map((user) => (
+                                    <tr key={user.id}>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{user.firstName} {user.lastName}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.email}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.role}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
+                                            <button onClick={() => handleEditUser(user)} className="text-indigo-600 hover:text-indigo-900">Edit</button>
+                                            <button onClick={() => handleDeleteUser(user.id, `${user.firstName} ${user.lastName}`)} className="text-red-600 hover:text-red-900">Delete</button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                        {/* Pagination */}
+                        {usersData.totalPages > 1 && (
+                            <div className="px-6 py-3 flex justify-between items-center">
+                                <span className="text-sm text-gray-700">Page {currentPage + 1} of {usersData.totalPages}</span>
+                                <div className="space-x-1">
+                                    <button onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 0} className="px-3 py-1 border rounded-md disabled:opacity-50"><ChevronLeftIcon className="h-4 w-4"/></button>
+                                    <button onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage >= usersData.totalPages - 1} className="px-3 py-1 border rounded-md disabled:opacity-50"><ChevronRightIcon className="h-4 w-4"/></button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </main>
         </div>
-      ),
-      { duration: 60000, position: 'top-center' }
     );
-  };
-
-  return (
-    <div className="flex min-h-screen bg-gray-100">
-      <Sidebar />
-      <main className="flex-1 p-6 sm:p-8 max-w-6xl mx-auto">
-        <h1 className="text-3xl font-bold text-gray-800 mb-6">User Management</h1>
-
-        {pageError && (
-          <div className="p-4 mb-6 bg-red-100 text-red-700 rounded shadow text-center">{pageError}</div>
-        )}
-
-        {loading && users.length === 0 ? (
-          <p className="text-center text-gray-600 animate-pulse">Loading users...</p>
-        ) : users.length === 0 ? (
-          <p className="text-center text-gray-500">No users found.</p>
-        ) : (
-          <>
-            <table className="min-w-full table-auto border-collapse border border-gray-300 rounded-md overflow-hidden shadow-sm bg-white">
-              <thead className="bg-gray-50 border-b border-gray-300">
-                <tr>
-                  <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700 border-r border-gray-300">ID</th>
-                  <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700 border-r border-gray-300">Name</th>
-                  <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700 border-r border-gray-300">Email</th>
-                  <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700 border-r border-gray-300">Role</th>
-                  <th className="px-4 py-2 text-center text-sm font-semibold text-gray-700">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((user) => (
-                  <tr
-                    key={user.id}
-                    className="hover:bg-gray-50 border-b border-gray-300 last:border-b-0"
-                  >
-                    <td className="px-4 py-3 text-sm text-gray-700 border-r border-gray-300">{user.id}</td>
-                    <td className="px-4 py-3 text-sm text-gray-800 border-r border-gray-300 truncate max-w-xs" title={`${user.firstName} ${user.lastName}`}>
-                      {user.firstName} {user.lastName}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-700 border-r border-gray-300 truncate max-w-sm" title={user.email}>
-                      {user.email}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-700 border-r border-gray-300">{user.role}</td>
-                    <td className="px-4 py-3 text-center text-sm space-x-2">
-                      {/* Edit can be implemented later, for now it just alerts */}
-                      <button
-                        onClick={() => alert("Edit User functionality to be implemented")}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-blue-600 hover:text-blue-800"
-                        aria-label={`Edit user ${user.firstName} ${user.lastName}`}
-                        title="Edit User"
-                      >
-                        <PencilSquareIcon className="h-5 w-5" />
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDeleteUser(user.id, `${user.firstName} ${user.lastName}`)}
-                        disabled={deletingUserId === user.id}
-                        className="inline-flex items-center gap-1 px-2 py-1 text-red-600 hover:text-red-800 disabled:opacity-50"
-                        aria-label={`Delete user ${user.firstName} ${user.lastName}`}
-                        title="Delete User"
-                      >
-                        <TrashIcon className="h-5 w-5" />
-                        {deletingUserId === user.id ? 'Deleting...' : 'Delete'}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            <nav className="flex justify-between items-center mt-6 px-2" aria-label="Pagination">
-              <button
-                onClick={() => paginate(0)}
-                disabled={currentPage === 0 || loading}
-                className="px-3 py-1 text-sm rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                First
-              </button>
-              <button
-                onClick={() => paginate(currentPage - 1)}
-                disabled={currentPage === 0 || loading}
-                className="px-4 py-1 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <ChevronLeftIcon className="h-5 w-5" />
-              </button>
-              <span className="text-sm text-gray-700">
-                Page <span className="font-semibold">{currentPage + 1}</span> of{' '}
-                <span className="font-semibold">{Math.ceil(totalUsers / USERS_PER_PAGE)}</span>
-              </span>
-              <button
-                onClick={() => paginate(currentPage + 1)}
-                disabled={currentPage >= Math.ceil(totalUsers / USERS_PER_PAGE) - 1 || loading}
-                className="px-4 py-1 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <ChevronRightIcon className="h-5 w-5" />
-              </button>
-              <button
-                onClick={() => paginate(Math.ceil(totalUsers / USERS_PER_PAGE) - 1)}
-                disabled={currentPage >= Math.ceil(totalUsers / USERS_PER_PAGE) - 1 || loading}
-                className="px-3 py-1 text-sm rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Last
-              </button>
-            </nav>
-          </>
-        )}
-      </main>
-    </div>
-  );
 }

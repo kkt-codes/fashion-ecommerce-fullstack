@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { useAuthContext } from './AuthContext';
-import apiClient from '../services/api'; 
 import toast from 'react-hot-toast';
+
+import { useAuth } from './AuthContext';
 import { useSignupSigninModal } from '../hooks/useSignupSigninModal';
+import { getMyFavorites, addFavorite, removeFavorite } from '../services/api';
 
 const FavoritesContext = createContext(null);
 
@@ -15,97 +16,96 @@ export const useFavorites = () => {
 };
 
 export const FavoritesProvider = ({ children }) => {
-  const [favoriteItems, setFavoriteItems] = useState([]); // Stores full ProductDto objects
-  const [isLoading, setIsLoading] = useState(false); 
-  const { currentUser, isAuthenticated, userRole, isLoading: authIsLoading } = useAuthContext();
-  const { openModal, switchToTab } = useSignupSigninModal();
+  const [favoriteItems, setFavoriteItems] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  // FIX: Destructure userRole to use in our logic
+  const { isAuthenticated, userRole, isLoading: isAuthLoading } = useAuth();
+  const { openModal } = useSignupSigninModal();
 
-  const fetchFavoritesFromBackend = useCallback(async () => {
-    if (!isAuthenticated || !currentUser || userRole !== 'BUYER') {
-      setFavoriteItems([]); 
+  // Fetches the user's favorites from the backend.
+  const fetchFavorites = useCallback(async () => {
+    // FIX: Add a role check. Only fetch favorites if the user is authenticated AND is a BUYER.
+    if (!isAuthenticated || userRole !== 'BUYER') {
+      setFavoriteItems([]); // Ensure favorites are empty for non-buyers.
       return;
     }
+    
     setIsLoading(true);
+    setError(null);
     try {
-      const response = await apiClient.get('/users/me/favorites'); // Returns List<ProductDto>
-      setFavoriteItems(response.data || []);
-      console.log(`FavoritesContext: Favorites fetched for user ${currentUser.id}`, response.data);
-    } catch (error) {
-      console.error("FavoritesContext: Error fetching favorites from backend", error.response?.data || error.message);
+      const { data } = await getMyFavorites();
+      setFavoriteItems(data || []);
+    } catch (err) {
+      console.error("FavoritesContext: Failed to fetch favorites", err);
+      setError(err);
       toast.error("Could not load your favorites.");
-      setFavoriteItems([]); 
     } finally {
       setIsLoading(false);
     }
-  }, [isAuthenticated, currentUser, userRole]);
+  }, [isAuthenticated, userRole]);
 
+  // Effect to load favorites when authentication state changes.
   useEffect(() => {
-    if (authIsLoading) {
-      return;
+    // This logic is now safe because fetchFavorites has the role check.
+    if (!isAuthLoading) {
+        fetchFavorites();
     }
-    if (isAuthenticated && currentUser?.id && userRole === 'BUYER') {
-      fetchFavoritesFromBackend();
-    } else {
-      setFavoriteItems([]); 
-    }
-  }, [isAuthenticated, currentUser, userRole, authIsLoading, fetchFavoritesFromBackend]);
+  }, [isAuthLoading, fetchFavorites]);
 
+  // Checks if a given product ID is in the user's favorites.
   const isFavorite = useCallback((productId) => {
-    return favoriteItems.some(item => String(item.id) === String(productId));
+    return favoriteItems.some(item => item.id === productId);
   }, [favoriteItems]);
 
+  // Toggles a product's favorite status.
   const toggleFavorite = useCallback(async (product) => {
-    if (!product || product.id === undefined) {
-        console.error("FavoritesContext: toggleFavorite called with invalid product.", product);
-        toast.error("Cannot update favorites: invalid product data.");
-        return;
-    }
-    const productIdStr = String(product.id);
-
-    if (!isAuthenticated || !currentUser || userRole !== 'BUYER') {
-      toast.error("Please sign in as a Buyer to manage your favorites.");
-      switchToTab("signin");
-      openModal();
+    if (!product?.id) {
+      toast.error("Cannot update favorites: Invalid product data.");
       return;
     }
 
-    setIsLoading(true);
-    const currentlyIsFavorite = favoriteItems.some(item => String(item.id) === productIdStr);
+    // This check correctly gates the feature to only buyers.
+    if (!isAuthenticated || userRole !== 'BUYER') {
+      toast.error("Please sign in as a Buyer to manage your favorites.");
+      openModal('signin');
+      return;
+    }
 
+    const currentlyIsFavorite = isFavorite(product.id);
+    
+    // Optimistic UI update for a faster user experience
+    if (currentlyIsFavorite) {
+      setFavoriteItems(prev => prev.filter(item => item.id !== product.id));
+    } else {
+      setFavoriteItems(prev => [...prev, product]);
+    }
+
+    // Perform the API call
     try {
       if (currentlyIsFavorite) {
-        await apiClient.delete(`/users/me/favorites/${productIdStr}`);
-        setFavoriteItems(prevItems => prevItems.filter(item => String(item.id) !== productIdStr));
-        toast.error(`${product.name || 'Item'} removed from favorites.`);
+        await removeFavorite(product.id);
+        toast.error(`${product.name} removed from favorites.`);
       } else {
-        await apiClient.post(`/users/me/favorites/${productIdStr}`);
-        // Backend returns void for POST, so we add the product to local state
-        // or refetch. For simplicity, add to local state if product object is available.
-        // A more robust way is to refetch or have backend return the new list/item.
-        // For now, we'll add the passed product object.
-        setFavoriteItems(prevItems => [...prevItems, product]); 
-        toast.success(`${product.name || 'Item'} added to favorites!`);
+        await addFavorite(product.id);
+        toast.success(`${product.name} added to favorites!`);
       }
-      // Optionally, refetch all favorites after any change to ensure perfect sync,
-      // though optimistic update is faster for UI.
-      // await fetchFavoritesFromBackend(); 
     } catch (error) {
-      console.error(`FavoritesContext: Error toggling favorite for product ${productIdStr}`, error.response?.data || error.message);
-      toast.error("Could not update your favorites. Please try again.");
-      // If API call failed, refetch to revert optimistic update or get correct state
-      await fetchFavoritesFromBackend(); 
-    } finally {
-      setIsLoading(false);
+      console.error(`FavoritesContext: Failed to toggle favorite for product ${product.id}`, error);
+      toast.error("Could not update your favorites. Reverting change.");
+      // If the API call fails, revert the optimistic update by refetching the source of truth
+      fetchFavorites();
     }
-  }, [isAuthenticated, currentUser, userRole, favoriteItems, openModal, switchToTab, fetchFavoritesFromBackend]);
+  }, [isAuthenticated, userRole, favoriteItems, openModal, isFavorite, fetchFavorites]);
 
   const value = {
-    favoriteItems, // Changed from favoriteIds
+    favoriteItems,
     isFavorite,
     toggleFavorite,
-    favoritesCount: favoriteItems.length, // Count based on items array
-    isLoadingFavorites: isLoading,
-    refetchFavorites: fetchFavoritesFromBackend // Expose refetch
+    favoritesCount: favoriteItems.length,
+    isLoading,
+    error,
+    refetchFavorites: fetchFavorites, // Expose a refetch function
   };
 
   return <FavoritesContext.Provider value={value}>{children}</FavoritesContext.Provider>;

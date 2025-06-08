@@ -14,9 +14,11 @@
     "@heroicons/react": "^2.2.0",
     "@tailwindcss/vite": "^4.1.4",
     "axios": "^1.9.0",
+    "buffer": "^6.0.3",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "flowbite-react": "^0.11.7",
+    "process": "^0.11.10",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-hot-toast": "^2.5.2",
@@ -36,6 +38,7 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.19",
     "globals": "^16.0.0",
+    "rollup-plugin-node-polyfills": "^0.2.1",
     "vite": "^6.3.1"
   }
 }

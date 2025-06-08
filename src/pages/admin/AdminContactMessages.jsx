@@ -1,241 +1,129 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import Sidebar from "../../components/Sidebar";
-import apiClient from "../../services/api";
-import toast from "react-hot-toast";
 import {
   EnvelopeIcon,
   CheckCircleIcon,
   TrashIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
 } from "@heroicons/react/24/outline";
+import toast from "react-hot-toast";
 
-const MESSAGES_PER_PAGE = 12;
+import { getContactMessages, updateContactMessageStatus, deleteContactMessage } from "../../services/api";
 
-export default function AdminContactMessages() {
+const MESSAGES_PER_PAGE = 10;
+
+export default function AdminContactMessagesPage() {
   const [messages, setMessages] = useState([]);
-  const [totalMessages, setTotalMessages] = useState(0);
-  const [currentPage, setCurrentPage] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [pageError, setPageError] = useState(null);
-  const [processingMessageId, setProcessingMessageId] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  
+  // Note: Pagination state can be added here if the API supports it.
+  // For simplicity, this refactored version fetches all messages.
 
-  const fetchMessages = async (page = 0) => {
-    setLoading(true);
-    setPageError(null);
+  const fetchMessages = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
     try {
-      // Backend endpoint: GET /admin/contact-messages?page={page}&size={MESSAGES_PER_PAGE}&sort=date,DESC
-      const response = await apiClient.get(
-        `/admin/contact-messages?page=${page}&size=${MESSAGES_PER_PAGE}&sort=date,DESC`
-      );
-      setMessages(response.data?.content || []);
-      setTotalMessages(response.data?.totalElements || 0);
-      setCurrentPage(response.data?.number || 0);
-    } catch (error) {
-      const errorMsg =
-        error.response?.data?.message || "Failed to load contact messages.";
-      setPageError(errorMsg);
+      // Assuming the endpoint returns all messages, not a paginated response.
+      // If paginated, you would pass params: getContactMessages({ page: currentPage, size: MESSAGES_PER_PAGE })
+      const { data } = await getContactMessages();
+      // The backend returns a simple list, not a page object for this endpoint
+      setMessages(data || []);
+    } catch (err) {
+      const errorMsg = err.response?.data?.message || "Failed to load contact messages.";
+      setError(errorMsg);
       toast.error(errorMsg);
-      setMessages([]);
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchMessages(currentPage);
-  }, [currentPage]);
+    fetchMessages();
+  }, [fetchMessages]);
 
-  const paginate = (page) => {
-    if (page >= 0 && page < Math.ceil(totalMessages / MESSAGES_PER_PAGE)) {
-      setCurrentPage(page);
-    }
-  };
-
-  const markAsResolved = async (messageId) => {
-    setProcessingMessageId(messageId);
+  const handleUpdateStatus = async (messageId, newStatus) => {
+    const toastId = toast.loading("Updating status...");
     try {
-      await apiClient.post(`/admin/contact-messages/${messageId}/resolve`);
-      toast.success("Message marked as resolved.");
-      // Refresh list after update
-      fetchMessages(currentPage);
-    } catch (error) {
-      console.error(
-        "Error marking message as resolved:",
-        error.response?.data || error.message
-      );
-      toast.error("Failed to mark as resolved.");
-    } finally {
-      setProcessingMessageId(null);
+      await updateContactMessageStatus(messageId, newStatus);
+      toast.success(`Message marked as ${newStatus}.`, { id: toastId });
+      fetchMessages(); // Refresh the list
+    } catch (err) {
+      toast.error("Failed to update status.", { id: toastId });
     }
   };
 
-  const deleteMessage = (messageId) => {
-    toast(
-      (t) => (
-        <div className="max-w-xs p-4 bg-white rounded shadow-md flex flex-col gap-3">
-          <p className="text-sm font-semibold text-gray-800">
-            Delete this message?
-          </p>
-          <div className="flex gap-2">
-            <button
-              onClick={async () => {
-                toast.dismiss(t.id);
-                setProcessingMessageId(messageId);
-                try {
-                  await apiClient.delete(`/admin/contact-messages/${messageId}`);
-                  toast.success("Message deleted.");
-                  fetchMessages(currentPage);
-                } catch (error) {
-                  console.error(
-                    "Delete message failed:",
-                    error.response?.data || error.message
-                  );
-                  toast.error("Failed to delete message.");
-                } finally {
-                  setProcessingMessageId(null);
-                }
-              }}
-              className="flex-1 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 transition"
-            >
-              Delete
-            </button>
-            <button
-              onClick={() => toast.dismiss(t.id)}
-              className="flex-1 py-1.5 bg-gray-200 rounded hover:bg-gray-300 transition"
-            >
-              Cancel
-            </button>
-          </div>
+  const handleDeleteMessage = (messageId) => {
+    toast((t) => (
+      <div className="p-4 bg-white rounded shadow-md">
+        <p className="font-semibold">Delete this message?</p>
+        <div className="flex gap-2 mt-3">
+          <button
+            onClick={async () => {
+              toast.dismiss(t.id);
+              const deleteToast = toast.loading("Deleting message...");
+              try {
+                await deleteContactMessage(messageId);
+                toast.success('Message deleted.', { id: deleteToast });
+                fetchMessages();
+              } catch (err) {
+                toast.error('Failed to delete message.', { id: deleteToast });
+              }
+            }}
+            className="px-4 py-1.5 bg-red-600 text-white rounded hover:bg-red-700"
+          >Delete</button>
+          <button onClick={() => toast.dismiss(t.id)} className="px-4 py-1.5 bg-gray-200 rounded hover:bg-gray-300">Cancel</button>
         </div>
-      ),
-      { duration: 60000, position: "top-center" }
+      </div>
+    ), { duration: 10000 });
+  };
+
+  const getStatusPill = (status) => {
+    const isUnread = status.toLowerCase() === 'unread';
+    return (
+        <span className={`px-2.5 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full ${isUnread ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}`}>
+            {status}
+        </span>
     );
   };
 
   return (
     <div className="flex min-h-screen bg-gray-100">
       <Sidebar />
-      <main className="flex-1 p-6 sm:p-8 max-w-5xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6 text-gray-800">Contact Messages</h1>
+      <main className="flex-1 p-6 sm:p-8">
+        <header className="mb-8">
+            <h1 className="text-3xl font-bold text-gray-800">Contact Messages</h1>
+            <p className="text-sm text-gray-500 mt-1">Review and manage messages submitted by users.</p>
+        </header>
 
-        {pageError && (
-          <div className="p-4 mb-6 bg-red-100 text-red-700 rounded shadow text-center">
-            {pageError}
-          </div>
-        )}
-
-        {loading && messages.length === 0 ? (
-          <p className="text-center text-gray-600 animate-pulse">
-            Loading contact messages...
-          </p>
-        ) : messages.length === 0 ? (
-          <p className="text-center text-gray-500">
-            No contact messages found.
-          </p>
-        ) : (
-          <>
-            <ul className="space-y-4">
+        {isLoading ? <p>Loading messages...</p> :
+         error ? <p className="text-red-500">{error}</p> :
+         messages.length === 0 ? <p>No contact messages found.</p> :
+         (
+            <div className="space-y-4">
               {messages.map((msg) => (
-                <li
-                  key={msg.id}
-                  className="bg-white p-5 rounded-lg shadow border border-gray-200"
-                >
-                  <div className="flex justify-between items-start">
-                    <div className="flex items-center space-x-3">
-                      <EnvelopeIcon className="h-8 w-8 text-blue-600" />
-                      <div>
-                        <p className="font-semibold text-gray-800">
-                          {msg.subject || "No Subject"}
-                        </p>
-                        <p className="text-sm text-gray-600">
-                          From: {msg.senderName || "Unknown"} &lt;{msg.email || "N/A"}&gt;
-                        </p>
-                        <p className="text-xs text-gray-400">
-                          {msg.date ? new Date(msg.date).toLocaleString() : "Date unavailable"}
-                        </p>
+                <div key={msg.id} className="bg-white p-5 rounded-lg shadow border border-gray-200">
+                  <div className="flex justify-between items-start gap-4">
+                    <div className="flex-grow">
+                      <div className="flex items-center gap-4 mb-2">
+                        <h2 className="text-lg font-semibold text-gray-800">{msg.subject}</h2>
+                        {getStatusPill(msg.status)}
                       </div>
+                      <p className="text-sm text-gray-600">From: {msg.senderName} &lt;{msg.senderEmail}&gt;</p>
+                      <p className="text-xs text-gray-400 mt-1">{new Date(msg.createdAt).toLocaleString()}</p>
                     </div>
-                    <div className="flex space-x-2">
-                      {!msg.resolved && (
-                        <button
-                          onClick={() => markAsResolved(msg.id)}
-                          disabled={processingMessageId === msg.id}
-                          className="flex items-center gap-1 text-green-600 hover:text-green-800 text-sm font-medium"
-                        >
-                          <CheckCircleIcon className="h-5 w-5" />
-                          {processingMessageId === msg.id ? 'Processing...' : 'Mark as Resolved'}
-                        </button>
+                    <div className="flex items-center space-x-2 flex-shrink-0">
+                      {msg.status.toLowerCase() === 'unread' && (
+                        <button onClick={() => handleUpdateStatus(msg.id, 'read')} className="text-green-600 hover:text-green-800" title="Mark as Read"><CheckCircleIcon className="h-5 w-5" /></button>
                       )}
-                      <button
-                        onClick={() => deleteMessage(msg.id)}
-                        disabled={processingMessageId === msg.id}
-                        className="flex items-center gap-1 text-red-600 hover:text-red-800 text-sm font-medium disabled:opacity-50"
-                      >
-                        <TrashIcon className="h-5 w-5" />
-                        Delete
-                      </button>
+                      <button onClick={() => handleDeleteMessage(msg.id)} className="text-red-600 hover:text-red-800" title="Delete Message"><TrashIcon className="h-5 w-5" /></button>
                     </div>
                   </div>
-                  <p className="mt-3 text-gray-700 whitespace-pre-wrap">{msg.message}</p>
-                  {msg.resolved && (
-                    <p className="mt-2 text-xs text-green-600 font-semibold">
-                      Resolved
-                    </p>
-                  )}
-                </li>
+                  <p className="mt-3 text-gray-700 whitespace-pre-wrap border-t pt-3">{msg.message}</p>
+                </div>
               ))}
-            </ul>
-
-            <nav
-              className="flex justify-between items-center mt-6 px-2"
-              aria-label="Pagination"
-            >
-              <button
-                onClick={() => paginate(0)}
-                disabled={currentPage === 0 || loading}
-                className="px-3 py-1 text-sm rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                First
-              </button>
-              <button
-                onClick={() => paginate(currentPage - 1)}
-                disabled={currentPage === 0 || loading}
-                className="px-4 py-1 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <ChevronLeftIcon className="h-5 w-5" />
-              </button>
-              <span className="text-sm text-gray-700">
-                Page <span className="font-semibold">{currentPage + 1}</span> of{" "}
-                <span className="font-semibold">
-                  {Math.ceil(totalMessages / MESSAGES_PER_PAGE)}
-                </span>
-              </span>
-              <button
-                onClick={() => paginate(currentPage + 1)}
-                disabled={
-                  currentPage >= Math.ceil(totalMessages / MESSAGES_PER_PAGE) - 1 ||
-                  loading
-                }
-                className="px-4 py-1 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <ChevronRightIcon className="h-5 w-5" />
-              </button>
-              <button
-                onClick={() =>
-                  paginate(Math.ceil(totalMessages / MESSAGES_PER_PAGE) - 1)
-                }
-                disabled={
-                  currentPage >= Math.ceil(totalMessages / MESSAGES_PER_PAGE) - 1 ||
-                  loading
-                }
-                className="px-3 py-1 text-sm rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Last
-              </button>
-            </nav>
-          </>
-        )}
+            </div>
+         )
+        }
       </main>
     </div>
   );

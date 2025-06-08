@@ -1,198 +1,148 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { InboxIcon } from "@heroicons/react/24/outline";
+
 import ProductCard from "../components/ProductCard";
 import ProductFilter from "../components/ProductFilter";
-import { useFetchCached, invalidateCacheEntry } from "../hooks/useFetchCached";
-import { InboxIcon as EmptyProductStateIcon } from "@heroicons/react/24/outline";
-import apiClient from "../services/api"; // For fetching categories and price range separately
+import { getProducts, getProductCategories, getProductPriceRange } from "../services/api";
 
 const PRODUCTS_PER_PAGE = 16;
+
+// Helper to get filter state from URL query params
+const getFiltersFromURL = (search) => {
+  const queryParams = new URLSearchParams(search);
+  return {
+    category: queryParams.get('category') || "All",
+    search: queryParams.get('search') || "",
+    minPrice: queryParams.get('minPrice') || '',
+    maxPrice: queryParams.get('maxPrice') || '',
+    sort: queryParams.get('sort') || "name-asc",
+    rating: Number(queryParams.get('rating')) || 0,
+    page: Number(queryParams.get('page')) || 0,
+  };
+};
 
 export default function ProductList() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const [selectedCategory, setSelectedCategory] = useState("All");
-  const [searchTerm, setSearchTerm] = useState("");
-  const [priceRange, setPriceRange] = useState({ min: '', max: '' });
-  const [sortOption, setSortOption] = useState("name-asc");
-  const [ratingFilter, setRatingFilter] = useState(0);
-  const [currentPage, setCurrentPage] = useState(0);
+  const [filters, setFilters] = useState(() => getFiltersFromURL(location.search));
+  const [currentPage, setCurrentPage] = useState(() => getFiltersFromURL(location.search).page);
 
-  // State for filter metadata
-  const [categories, setCategories] = useState(["All"]); // Initialize with "All"
-  const [minPossiblePrice, setMinPossiblePrice] = useState(0);
-  const [maxPossiblePrice, setMaxPossiblePrice] = useState(1000); // Default
-  const [filterMetaLoading, setFilterMetaLoading] = useState(true);
+  const [categories, setCategories] = useState(["All"]);
+  const [priceRangeMeta, setPriceRangeMeta] = useState({ min: 0, max: 1000 });
+  const [isMetaLoading, setIsMetaLoading] = useState(true);
 
-  // Fetch categories from backend
+  const [productsData, setProductsData] = useState({ content: [], totalPages: 0, totalElements: 0, number: 0, pageable: { offset: 0 }, numberOfElements: 0 });
+  const [isProductsLoading, setIsProductsLoading] = useState(true);
+  const [productsError, setProductsError] = useState(null);
+
   useEffect(() => {
-    const fetchCategories = async () => {
+    const fetchFilterMetadata = async () => {
+      setIsMetaLoading(true);
       try {
-        const response = await apiClient.get('/products/categories');
-        setCategories(['All', ...response.data.sort()]);
+        const [categoriesRes, priceRangeRes] = await Promise.all([
+          getProductCategories(),
+          getProductPriceRange()
+        ]);
+        setCategories(['All', ...categoriesRes.data.sort()]);
+        setPriceRangeMeta({
+          min: Math.floor(priceRangeRes.data.minPrice) || 0,
+          max: Math.ceil(priceRangeRes.data.maxPrice) || 1000,
+        });
       } catch (error) {
-        console.error("Error fetching categories:", error);
-        // Keep default or set to empty + All
-        setCategories(["All"]);
-      }
-    };
-    fetchCategories();
-  }, []);
-
-  // Fetch price range metadata from backend
-  useEffect(() => {
-    const fetchPriceRange = async () => {
-      try {
-        const response = await apiClient.get('/products/price-range-meta');
-        if (response.data) {
-          setMinPossiblePrice(Math.floor(response.data.minPrice) || 0);
-          setMaxPossiblePrice(Math.ceil(response.data.maxPrice) || 1000);
-        }
-      } catch (error) {
-        console.error("Error fetching price range metadata:", error);
+        console.error("Error fetching filter metadata:", error);
       } finally {
-        setFilterMetaLoading(false); // Combined loading state for filter metadata
+        setIsMetaLoading(false);
       }
     };
-    fetchPriceRange();
+    fetchFilterMetadata();
   }, []);
 
-
-  const buildApiUrl = useCallback(() => {
+  useEffect(() => {
     const params = new URLSearchParams();
-    params.append("page", currentPage.toString());
-    params.append("size", PRODUCTS_PER_PAGE.toString());
-
-    if (selectedCategory !== "All") {
-      params.append("category", selectedCategory);
-    }
-    if (searchTerm.trim() !== "") {
-      params.append("searchTerm", searchTerm.trim());
-    }
-    if (priceRange.min !== '' && !isNaN(parseFloat(priceRange.min))) {
-      params.append("minPrice", parseFloat(priceRange.min).toString());
-    }
-    if (priceRange.max !== '' && !isNaN(parseFloat(priceRange.max))) {
-      params.append("maxPrice", parseFloat(priceRange.max).toString());
-    }
-    if (ratingFilter > 0) {
-      params.append("minRating", ratingFilter.toString());
-    }
+    if (filters.search) params.set('search', filters.search);
+    if (filters.category !== 'All') params.set('category', filters.category);
+    if (filters.minPrice) params.set('minPrice', filters.minPrice);
+    if (filters.maxPrice) params.set('maxPrice', filters.maxPrice);
+    if (filters.rating !== 0) params.set('rating', filters.rating);
+    if (filters.sort !== 'name-asc') params.set('sort', filters.sort);
+    if (currentPage > 0) params.set('page', currentPage);
     
-    const [sortBy, sortDir] = sortOption.split('-');
-    if (sortBy && sortDir) {
-      params.append("sortBy", sortBy);
-      params.append("sortDir", sortDir.toUpperCase());
-    } else if (sortOption === 'default') { // Handle 'default' explicitly if needed
-        params.append("sortBy", "name"); 
-        params.append("sortDir", "ASC");
+    navigate(`${location.pathname}?${params.toString()}`, { replace: true });
+  }, [filters, currentPage, navigate, location.pathname]);
+
+
+  const fetchProducts = useCallback(async () => {
+    setIsProductsLoading(true);
+    setProductsError(null);
+
+    const [sortBy, sortDir] = filters.sort.split('-');
+    
+    const apiParams = {
+      page: currentPage,
+      size: PRODUCTS_PER_PAGE,
+      searchTerm: filters.search,
+      category: filters.category === 'All' ? null : filters.category,
+      minPrice: filters.minPrice || null,
+      maxPrice: filters.maxPrice || null,
+      // FIX: Handle the new rating filter logic
+      // Send minRating only if it's a positive number (1, 2, 3, 4)
+      minRating: filters.rating > 0 ? filters.rating : null,
+      // Send a new parameter if the user wants to see products with no reviews
+      noReviews: filters.rating === -1 ? true : null,
+      sortBy: sortBy,
+      sortDir: sortDir.toUpperCase(),
+    };
+
+    // Clean up null/empty values from params object before sending
+    Object.keys(apiParams).forEach(key => (apiParams[key] == null || apiParams[key] === '') && delete apiParams[key]);
+
+    try {
+      const { data } = await getProducts(apiParams);
+      setProductsData(data);
+    } catch (error) {
+      console.error("Failed to fetch products:", error);
+      setProductsError(error.response?.data || error);
+    } finally {
+      setIsProductsLoading(false);
     }
-
-    return `/products?${params.toString()}`;
-  }, [currentPage, selectedCategory, searchTerm, priceRange, sortOption, ratingFilter]);
-
-  const [apiUrl, setApiUrl] = useState(buildApiUrl());
+  }, [filters, currentPage]);
 
   useEffect(() => {
-    setApiUrl(buildApiUrl());
-  }, [buildApiUrl]);
-
-  const {
-    data: productsData,
-    loading: productsLoading,
-    error: productsError,
-    forceRefetch: refetchProductsFromHook
-  } = useFetchCached(`products-${apiUrl}`, apiUrl, {
-     // cacheDuration: 1 * 60 * 1000 
-  });
+    fetchProducts();
+  }, [fetchProducts]);
   
-  useEffect(() => {
-    const queryParams = new URLSearchParams(location.search);
-    const searchFromQuery = queryParams.get('search');
-    const categoryFromQuery = queryParams.get('category');
+  const handleFilterChange = (newFilters) => {
+    setCurrentPage(0);
+    setFilters(prev => ({ ...prev, ...newFilters }));
+  };
 
-    if (searchFromQuery) setSearchTerm(searchFromQuery);
-    else setSearchTerm(''); 
-
-    if (categoryFromQuery && categories.length > 1 && categories.includes(categoryFromQuery)) { // categories includes "All"
-        setSelectedCategory(categoryFromQuery);
-    } else if (!categoryFromQuery && categories.length > 0) {
-        // setSelectedCategory("All"); // Or keep current if not in URL
-    }
-    // setCurrentPage(0); // Reset page when URL search params change directly
-  }, [location.search, categories]);
-
-
-  const products = useMemo(() => productsData?.content || [], [productsData]);
-  const totalPages = useMemo(() => productsData?.totalPages || 0, [productsData]);
-  const totalElements = useMemo(() => productsData?.totalElements || 0, [productsData]);
-
-  const forceRefetch = useCallback(() => {
-    invalidateCacheEntry(`products-${apiUrl}`);
-    refetchProductsFromHook(); 
-  }, [apiUrl, refetchProductsFromHook]);
-
-
-  const paginate = (pageNumber) => { 
-    if (pageNumber >= 0 && pageNumber < totalPages) {
+  const handleResetAllFilters = () => {
+    setCurrentPage(0);
+    setFilters({ category: 'All', search: '', minPrice: '', maxPrice: '', sort: 'name-asc', rating: 0 });
+  };
+  
+  const handlePaginate = (pageNumber) => {
+    if (pageNumber >= 0 && pageNumber < productsData.totalPages) {
       setCurrentPage(pageNumber);
-      
       const productListTop = document.getElementById('product-list-section');
       if (productListTop) {
-        const headerOffset = document.querySelector('nav')?.offsetHeight || 70; 
+        const headerOffset = document.querySelector('nav')?.offsetHeight || 70;
         const elementPosition = productListTop.getBoundingClientRect().top + window.pageYOffset;
-        const offsetPosition = elementPosition - headerOffset - 20; 
+        const offsetPosition = elementPosition - headerOffset - 20;
         window.scrollTo({ top: offsetPosition, behavior: "smooth" });
-      } else {
-        window.scrollTo({top: 0, behavior: 'smooth'});
       }
     }
   };
   
-  const handleResetAllFilters = () => {
-    setSelectedCategory("All");
-    setSearchTerm("");
-    setPriceRange({ min: '', max: '' });
-    setSortOption("name-asc"); 
-    setRatingFilter(0);
-    setCurrentPage(0); 
-    navigate(location.pathname, { replace: true }); 
-  };
-  
-  useEffect(() => {
-    setCurrentPage(0); 
-  }, [selectedCategory, searchTerm, priceRange, sortOption, ratingFilter]);
+  const { products, totalPages, totalElements } = useMemo(() => ({
+      products: productsData?.content || [],
+      totalPages: productsData?.totalPages || 0,
+      totalElements: productsData?.totalElements || 0,
+  }), [productsData]);
 
-  // Combined loading state for initial page render
-  const initialDataLoading = productsLoading && !productsData && filterMetaLoading;
-
-  if (initialDataLoading) {
-    return (
-      <div className="flex justify-center items-center min-h-[calc(100vh-10rem)] bg-gray-50">
-        <p className="text-gray-600 text-xl animate-pulse">Loading products and filters...</p>
-      </div>
-    );
-  }
-
-  if (productsError) {
-    return (
-      <div className="flex flex-col justify-center items-center min-h-[calc(100vh-10rem)] bg-gray-50 text-center px-4">
-        <h2 className="text-2xl font-semibold text-red-600 mb-3">Oops! Something went wrong.</h2>
-        <p className="text-gray-700 mb-2">We couldn't load the products at this time.</p>
-        <p className="text-sm text-gray-500 mb-6">Error: {productsError.message} (Status: {productsError.status})</p>
-        <button
-          onClick={forceRefetch}
-          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          Try Again
-        </button>
-      </div>
-    );
-  }
-  
-  const headerHeight = "4rem"; 
-
+  // ... The rest of your JSX for this component remains the same ...
   return (
     <div className="bg-gray-50">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -205,8 +155,8 @@ export default function ProductList() {
           <input
             type="text"
             placeholder="Search by product name or description..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            value={filters.search}
+            onChange={(e) => handleFilterChange({ search: e.target.value })}
             className="w-full border border-gray-300 p-3 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent sm:text-sm"
           />
         </div>
@@ -214,38 +164,32 @@ export default function ProductList() {
         <div id="product-list-section" className="flex flex-col md:flex-row md:gap-8 relative">
           <aside 
             className="w-full md:w-1/3 lg:w-1/4 xl:w-1/5 md:sticky self-start mb-8 md:mb-0"
-            style={{ top: `calc(${headerHeight} + 1rem)` }} 
+            style={{ top: '5rem' }} 
           >
-            {filterMetaLoading ? (
-                <p className="p-6 text-center text-gray-500">Loading filters...</p>
-            ) : (
-                <ProductFilter
-                  categories={categories} 
-                  selectedCategory={selectedCategory}
-                  setSelectedCategory={setSelectedCategory}
-                  priceRange={priceRange}
-                  setPriceRange={setPriceRange}
-                  sortOption={sortOption}
-                  setSortOption={setSortOption}
-                  minPossiblePrice={minPossiblePrice} 
-                  maxPossiblePrice={maxPossiblePrice} 
-                  ratingFilter={ratingFilter}
-                  setRatingFilter={setRatingFilter}
-                  onResetFilters={handleResetAllFilters}
-                />
-            )}
+            <ProductFilter
+              categories={categories}
+              filters={filters}
+              setFilters={handleFilterChange}
+              priceRangeMeta={priceRangeMeta}
+              onResetFilters={handleResetAllFilters}
+            />
           </aside>
 
-          <main 
-            id="product-grid-container" 
-            className="w-full md:w-2/3 lg:w-3/4 xl:w-4/5"
-            >
-            {productsLoading && <p className="text-center text-gray-500 py-4">Updating results...</p>}
-            {!productsLoading && products.length > 0 ? (
+          <main id="product-grid-container" className="w-full md:w-2/3 lg:w-3/4 xl:w-4/5">
+            {isProductsLoading ? (
+               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                 {Array.from({ length: 8 }).map((_, index) => (
+                    <div key={index} className="border border-gray-200 rounded-lg p-4 bg-white animate-pulse">
+                        <div className="bg-gray-300 h-48 rounded-md mb-4"></div>
+                        <div className="h-4 bg-gray-300 rounded w-3/4 mb-2"></div>
+                        <div className="h-4 bg-gray-300 rounded w-1/2"></div>
+                    </div>
+                 ))}
+               </div>
+            ) : products.length > 0 ? (
               <>
                 <div className="mb-4 text-sm text-gray-600">
-                  Showing {productsData?.pageable?.offset + 1} - 
-                  {productsData?.pageable?.offset + productsData?.numberOfElements} of {totalElements} products
+                  Showing {productsData.pageable.offset + 1} - {productsData.pageable.offset + productsData.numberOfElements} of {totalElements} products
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                   {products.map((product) => (
@@ -255,80 +199,23 @@ export default function ProductList() {
                 {totalPages > 1 && (
                   <nav className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-10 mb-4 py-4 border-t border-gray-200" aria-label="Pagination">
                     <p className="text-sm text-gray-700">
-                      Page {productsData?.number + 1} of {totalPages} 
+                      Page {productsData.number + 1} of {totalPages} 
                     </p>
                     <div className="flex items-center space-x-1">
-                      <button
-                        onClick={() => paginate(0)}
-                        disabled={currentPage === 0}
-                        className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
-                      >
-                        First
-                      </button>
-                      <button
-                        onClick={() => paginate(currentPage - 1)}
-                        disabled={currentPage === 0}
-                        className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
-                      >
-                        Prev
-                      </button>
-                      {/* Dynamic Page Numbers */}
-                      {Array.from({ length: totalPages }, (_, i) => i).map(pageIndex => {
-                          // Logic to show limited page numbers e.g., first, last, current, and 2 around current
-                          const showPage = totalPages <= 7 || // Show all if 7 or less
-                                           pageIndex === currentPage || // Current page
-                                           (pageIndex >= currentPage - 1 && pageIndex <= currentPage + 1) || // Pages around current
-                                           pageIndex === 0 || pageIndex === totalPages - 1; // First and last
-
-                          const showEllipsisBefore = pageIndex === currentPage - 2 && currentPage > 2 && pageIndex !== 0;
-                          const showEllipsisAfter = pageIndex === currentPage + 2 && currentPage < totalPages - 3 && pageIndex !== totalPages - 1;
-                          
-                          if (showEllipsisBefore && !(pageIndex >= currentPage - 1 && pageIndex <= currentPage + 1) && pageIndex !== 0 ) {
-                              return <span key={`ellipsis-start-${pageIndex}`} className="px-3 py-1.5 text-sm">...</span>;
-                          }
-                          if (showPage) {
-                            return (
-                                <button
-                                key={pageIndex}
-                                onClick={() => paginate(pageIndex)}
-                                className={`px-3 py-1.5 text-sm font-medium border rounded-md ${
-                                    currentPage === pageIndex
-                                    ? 'bg-blue-600 text-white border-blue-600'
-                                    : 'text-gray-600 bg-white border-gray-300 hover:bg-gray-50'
-                                }`}
-                                >
-                                {pageIndex + 1}
-                                </button>
-                            );
-                          }
-                          if (showEllipsisAfter && !(pageIndex >= currentPage - 1 && pageIndex <= currentPage + 1) && pageIndex !== totalPages -1) {
-                              return <span key={`ellipsis-end-${pageIndex}`} className="px-3 py-1.5 text-sm">...</span>;
-                          }
-                          return null;
-                        })}
-                      <button
-                        onClick={() => paginate(currentPage + 1)}
-                        disabled={currentPage >= totalPages - 1}
-                        className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
-                      >
-                        Next
-                      </button>
-                      <button
-                        onClick={() => paginate(totalPages - 1)}
-                        disabled={currentPage >= totalPages - 1 || totalPages === 0}
-                        className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
-                      >
-                        Last
-                      </button>
+                      <button onClick={() => handlePaginate(0)} disabled={currentPage === 0} className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50">First</button>
+                      <button onClick={() => handlePaginate(currentPage - 1)} disabled={currentPage === 0} className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50">Prev</button>
+                      {/* Pagination numbers can be added here if needed */}
+                      <button onClick={() => handlePaginate(currentPage + 1)} disabled={currentPage >= totalPages - 1} className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50">Next</button>
+                      <button onClick={() => handlePaginate(totalPages - 1)} disabled={currentPage >= totalPages - 1} className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50">Last</button>
                     </div>
                   </nav>
                 )}
               </>
             ) : (
               <div className="col-span-full text-center text-gray-500 py-16 bg-white rounded-lg shadow-md">
-                <EmptyProductStateIcon className="mx-auto h-16 w-16 text-gray-400 mb-4" />
+                <InboxIcon className="mx-auto h-16 w-16 text-gray-400 mb-4" />
                 <h3 className="text-xl font-semibold mb-2 text-gray-700">No Products Found</h3>
-                <p className="text-gray-600">Try adjusting your search or filter criteria, or <button onClick={handleResetAllFilters} className="text-blue-600 hover:underline">reset all filters</button>.</p>
+                <p className="text-gray-600">Try adjusting your filters, or <button onClick={handleResetAllFilters} className="text-blue-600 hover:underline">reset all filters</button>.</p>
               </div>
             )}
           </main>

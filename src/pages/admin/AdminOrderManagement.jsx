@@ -1,247 +1,220 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import Sidebar from '../../components/Sidebar';
-import apiClient from '../../services/api';
-import toast from 'react-hot-toast';
 import {
   ClipboardDocumentListIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   PencilSquareIcon,
   TrashIcon,
-  ExclamationTriangleIcon,
+  XMarkIcon,
 } from '@heroicons/react/24/outline';
+import toast from 'react-hot-toast';
 
-const ORDERS_PER_PAGE = 12;
+import { getAllOrders, deleteOrder, updateOrderStatus } from '../../services/api';
 
-export default function AdminOrderManagement() {
-  const [orders, setOrders] = useState([]);
-  const [totalOrders, setTotalOrders] = useState(0);
+const ORDERS_PER_PAGE = 15;
+
+const EditOrderModal = ({ order, onClose, onOrderUpdate }) => {
+    const [status, setStatus] = useState(order.status);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const availableStatuses = ["PENDING_PAYMENT", "PAID", "PROCESSING", "SHIPPED", "COMPLETED", "CANCELLED", "PAYMENT_FAILED"];
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (status === order.status) {
+            toast.error("No changes made to status.");
+            return;
+        }
+        setIsSubmitting(true);
+        const toastId = toast.loading("Updating order status...");
+        try {
+            await updateOrderStatus(order.id, status);
+            toast.success("Order status updated!", { id: toastId });
+            onOrderUpdate();
+            onClose();
+        } catch (error) {
+            toast.error(error.response?.data?.message || "Failed to update status.", { id: toastId });
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+    
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50">
+            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md m-4">
+                <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-xl font-semibold">Edit Order #{String(order.id).slice(-8)}</h2>
+                    <button onClick={onClose} className="p-1 rounded-full hover:bg-gray-200"><XMarkIcon className="h-6 w-6" /></button>
+                </div>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label htmlFor="status" className="block text-sm font-medium text-gray-700">Order Status</label>
+                        <select
+                            id="status"
+                            value={status}
+                            onChange={(e) => setStatus(e.target.value)}
+                            className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
+                        >
+                            {availableStatuses.map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
+                        </select>
+                    </div>
+                    <div className="mt-6 flex justify-end gap-3">
+                        <button type="button" onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Cancel</button>
+                        <button type="submit" disabled={isSubmitting} className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:bg-gray-400">
+                            {isSubmitting ? "Saving..." : "Save Status"}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+export default function AdminOrderManagementPage() {
+  const [ordersData, setOrdersData] = useState({ content: [], totalPages: 0 });
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [currentPage, setCurrentPage] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [pageError, setPageError] = useState(null);
-  const [processingOrderId, setProcessingOrderId] = useState(null);
 
-  const fetchOrders = async (page = 0) => {
-    setLoading(true);
-    setPageError(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState(null);
+
+  const fetchOrders = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
     try {
-      // Backend endpoint expects page, size, sort params
-      const response = await apiClient.get(`/admin/orders?page=${page}&size=${ORDERS_PER_PAGE}&sort=date,DESC`);
-      setOrders(response.data?.content || []);
-      setTotalOrders(response.data?.totalElements || 0);
-      setCurrentPage(response.data?.number || 0);
-    } catch (error) {
-      const errorMsg = error.response?.data?.message || 'Failed to load orders.';
-      setPageError(errorMsg);
-      toast.error(errorMsg);
-      setOrders([]);
+      const params = { page: currentPage, size: ORDERS_PER_PAGE, sort: 'date,DESC' };
+      const { data } = await getAllOrders(params);
+      // Check if the API response is a proper pagination object
+            if (data && data.content) {
+                setOrdersData(data);
+            }
+            // If the response is a simple array, wrap it in the expected structure
+            else if (Array.isArray(data)) {
+                setOrdersData({ content: data, totalPages: 1 });
+            }
+            // Handle any other unexpected format
+            else {
+                setOrdersData({ content: [], totalPages: 0 });
+            }
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to load orders.');
+      // Ensure state is clean on error
+      setOrdersData({ content: [], totalPages: 0 });
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchOrders(currentPage);
   }, [currentPage]);
 
-  const paginate = (page) => {
-    if (page >= 0 && page < Math.ceil(totalOrders / ORDERS_PER_PAGE)) {
-      setCurrentPage(page);
-    }
+  useEffect(() => {
+    fetchOrders();
+  }, [fetchOrders]);
+  
+  const handleEditOrder = (order) => {
+    setSelectedOrder(order);
+    setIsEditModalOpen(true);
   };
 
   const handleDeleteOrder = (orderId) => {
-    toast(
-      (t) => (
-        <div className="max-w-xs p-4 bg-white rounded shadow-md flex flex-col gap-3">
-          <p className="text-sm font-semibold text-gray-800">Delete this order?</p>
-          <div className="flex gap-2">
-            <button
-              onClick={async () => {
-                toast.dismiss(t.id);
-                setProcessingOrderId(orderId);
-                try {
-                  await apiClient.delete(`/admin/orders/${orderId}`);
-                  toast.success('Order deleted.');
-                  // After deleting, refetch orders or adjust page if needed 
-                  if (orders.length === 1 && currentPage > 0) {
-                    setCurrentPage(prev => prev - 1);
-                  } else {
-                    fetchOrders(currentPage);
-                  }
-                } catch (error) {
-                  console.error('Delete order failed:', error.response?.data || error.message);
-                  toast.error('Failed to delete order. Please try again.');
-                } finally {
-                  setProcessingOrderId(null);
-                }
-              }}
-              className="flex-1 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 transition"
-            >
-              Delete
-            </button>
-            <button
-              onClick={() => toast.dismiss(t.id)}
-              className="flex-1 py-1.5 bg-gray-200 rounded hover:bg-gray-300 transition"
-            >
-              Cancel
-            </button>
-          </div>
+    toast((t) => (
+      <div className="p-4 bg-white rounded shadow-md">
+        <p className="font-semibold">Delete Order #{String(orderId).slice(-8)}?</p>
+        <div className="flex gap-2 mt-3">
+          <button
+            onClick={async () => {
+              toast.dismiss(t.id);
+              const deleteToast = toast.loading("Deleting order...");
+              try {
+                await deleteOrder(orderId);
+                toast.success('Order deleted.', { id: deleteToast });
+                fetchOrders();
+              } catch (err) {
+                toast.error('Failed to delete order.', { id: deleteToast });
+              }
+            }}
+            className="px-4 py-1.5 bg-red-600 text-white rounded hover:bg-red-700"
+          >Delete</button>
+          <button onClick={() => toast.dismiss(t.id)} className="px-4 py-1.5 bg-gray-200 rounded hover:bg-gray-300">Cancel</button>
         </div>
-      ),
-      { duration: 60000, position: 'top-center' }
-    );
+      </div>
+    ), { duration: 10000 });
   };
 
   const getStatusColor = (status) => {
     switch ((status || '').toUpperCase()) {
-      case 'PAID':
-      case 'COMPLETED':
-      case 'SHIPPED':
-        return 'bg-green-100 text-green-700';
-      case 'PROCESSING':
-        return 'bg-blue-100 text-blue-700';
-      case 'PENDING_PAYMENT':
-      case 'PENDING':
-        return 'bg-yellow-100 text-yellow-700';
-      case 'CANCELLED':
-      case 'PAYMENT_FAILED':
-        return 'bg-red-100 text-red-700';
-      default:
-        return 'bg-gray-100 text-gray-700';
+      case 'PAID': case 'COMPLETED': case 'SHIPPED': return 'bg-green-100 text-green-700';
+      case 'PROCESSING': return 'bg-blue-100 text-blue-700';
+      case 'PENDING_PAYMENT': case 'PENDING': return 'bg-yellow-100 text-yellow-700';
+      case 'CANCELLED': case 'PAYMENT_FAILED': return 'bg-red-100 text-red-700';
+      default: return 'bg-gray-100 text-gray-700';
     }
   };
 
   return (
     <div className="flex min-h-screen bg-gray-100">
+      {isEditModalOpen && selectedOrder && (
+        <EditOrderModal
+          order={selectedOrder}
+          onClose={() => setIsEditModalOpen(false)}
+          onOrderUpdate={() => {
+            setIsEditModalOpen(false);
+            fetchOrders();
+          }}
+        />
+      )}
       <Sidebar />
-      <main className="flex-1 p-6 sm:p-8 max-w-6xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6 text-gray-800">Order Management</h1>
+      <main className="flex-1 p-6 sm:p-8">
+        <header className="mb-6">
+          <h1 className="text-3xl font-bold text-gray-800">Order Management</h1>
+          <p className="text-sm text-gray-500 mt-1">View and manage all orders on the platform.</p>
+        </header>
 
-        {pageError && (
-          <div className="p-4 mb-6 bg-red-100 text-red-700 rounded shadow text-center">
-            {pageError}
-          </div>
-        )}
-
-        {loading && orders.length === 0 ? (
-          <p className="text-center text-gray-600 animate-pulse">Loading orders...</p>
-        ) : orders.length === 0 ? (
-          <p className="text-center text-gray-500">No orders found.</p>
-        ) : (
-          <>
-            <table className="min-w-full table-auto border-collapse border border-gray-300 rounded-md overflow-hidden shadow-sm bg-white">
-              <thead className="bg-gray-50 border-b border-gray-300">
+        {isLoading && ordersData.content.length === 0 ? <p>Loading orders...</p> :
+        error ? <p className="text-red-500">{error}</p> :
+        (
+          <div className="bg-white rounded-lg shadow overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase border-r border-gray-300">Order ID</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase border-r border-gray-300">Date</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase border-r border-gray-300">Buyer</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase border-r border-gray-300">Product</th>
-                  <th className="px-3 py-3 text-center text-xs font-semibold text-gray-700 uppercase border-r border-gray-300">Qty</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase border-r border-gray-300">Status</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase border-r border-gray-300">Total</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase">Actions</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Order ID</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Buyer ID</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
                 </tr>
               </thead>
-              <tbody>
-                {orders.map((order) => (
-                  <tr key={order.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-700 border-r border-gray-300" title={String(order.id)}>
-                      #{String(order.id).slice(-8)}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-700 border-r border-gray-300">
-                      {order.date ? new Date(order.date).toLocaleDateString() : 'N/A'}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-800 border-r border-gray-300 truncate max-w-xs">
-                      {order.buyerName || order.buyerEmail || 'N/A'}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 border-r border-gray-300 truncate max-w-xs">
-                      {order.productName || `Product ID: ${order.productId || 'N/A'}`}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-center text-sm text-gray-700 border-r border-gray-300">
-                      {order.quantity || 1}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-xs sm:text-sm border-r border-gray-300">
-                      <span className={`px-2.5 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(order.status)}`}>
-                        {order.status ? order.status.replace('_', ' ') : 'N/A'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-semibold text-gray-800 border-r border-gray-300">
-                      ${order.total !== undefined ? order.total.toFixed(2) : 'N/A'}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-center text-sm space-x-2">
-                      {/* Edit button could navigate to an order detail or update page if implemented */}
-                      <button
-                        onClick={() => toast('Edit functionality not implemented.')}
-                        className="text-blue-600 hover:text-blue-800"
-                        aria-label="Edit order"
-                        title="Edit order (not implemented)"
-                      >
-                        <PencilSquareIcon className="h-5 w-5 inline" />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteOrder(order.id)}
-                        disabled={processingOrderId === order.id}
-                        aria-label="Delete order"
-                        title="Delete order"
-                        className="text-red-600 hover:text-red-800 disabled:opacity-50"
-                      >
-                        {processingOrderId === order.id ? (
-                          <svg className="animate-spin h-5 w-5 inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                          </svg>
-                        ) : (
-                          <TrashIcon className="h-5 w-5 inline" />
-                        )}
-                      </button>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {ordersData.content.map((order) => (
+                  <tr key={order.id}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">#{order.id}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{new Date(order.date).toLocaleDateString()}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500" title={order.userId}>{order.userId.substring(0,8)}...</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{order.productName} (x{order.quantity})</td>
+                    <td className="px-6 py-4 whitespace-nowrap"><span className={`px-2.5 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(order.status)}`}>{order.status.replace('_', ' ')}</span></td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-semibold text-gray-800">${order.total.toFixed(2)}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
+                        <button onClick={() => handleEditOrder(order)} className="text-indigo-600 hover:text-indigo-900">Edit</button>
+                        <button onClick={() => handleDeleteOrder(order.id)} className="text-red-600 hover:text-red-900">Delete</button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-
-            {/* Pagination Controls */}
-            {totalOrders > ORDERS_PER_PAGE && (
-              <nav className="flex justify-between items-center mt-6 px-2" aria-label="Pagination">
-                <button
-                  onClick={() => paginate(0)}
-                  disabled={currentPage === 0 || loading}
-                  className="px-3 py-1 text-sm rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  First
-                </button>
-                <button
-                  onClick={() => paginate(currentPage - 1)}
-                  disabled={currentPage === 0 || loading}
-                  className="px-4 py-1 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <ChevronLeftIcon className="h-5 w-5" />
-                </button>
-                <span className="text-sm text-gray-700">
-                  Page <span className="font-semibold">{currentPage + 1}</span> of{' '}
-                  <span className="font-semibold">{Math.ceil(totalOrders / ORDERS_PER_PAGE)}</span>
-                </span>
-                <button
-                  onClick={() => paginate(currentPage + 1)}
-                  disabled={currentPage >= Math.ceil(totalOrders / ORDERS_PER_PAGE) - 1 || loading}
-                  className="px-4 py-1 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <ChevronRightIcon className="h-5 w-5" />
-                </button>
-                <button
-                  onClick={() => paginate(Math.ceil(totalOrders / ORDERS_PER_PAGE) - 1)}
-                  disabled={currentPage >= Math.ceil(totalOrders / ORDERS_PER_PAGE) - 1 || loading}
-                  className="px-3 py-1 text-sm rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Last
-                </button>
-              </nav>
+            {ordersData.totalPages > 1 && (
+                <div className="px-6 py-3 flex justify-between items-center">
+                    <span className="text-sm text-gray-700">Page {currentPage + 1} of {ordersData.totalPages}</span>
+                    <div className="space-x-1">
+                        <button onClick={() => setCurrentPage(p => p - 1)} disabled={currentPage === 0} className="px-3 py-1 border rounded-md disabled:opacity-50"><ChevronLeftIcon className="h-4 w-4"/></button>
+                        <button onClick={() => setCurrentPage(p => p + 1)} disabled={currentPage >= ordersData.totalPages - 1} className="px-3 py-1 border rounded-md disabled:opacity-50"><ChevronRightIcon className="h-4 w-4"/></button>
+                    </div>
+                </div>
             )}
-          </>
+          </div>
         )}
       </main>
     </div>
   );
 }
-

@@ -1,107 +1,105 @@
-import React, { useEffect, useState } from "react";
-import Sidebar from "../../components/Sidebar";
-import apiClient from "../../services/api";
-import toast from "react-hot-toast";
+import React, { useEffect, useState, useCallback } from "react";
+import { Link } from "react-router-dom";
 import {
   UserGroupIcon,
   ArchiveBoxIcon,
   ClipboardDocumentListIcon,
   EnvelopeIcon,
-  Cog6ToothIcon,
+  ExclamationTriangleIcon
 } from "@heroicons/react/24/outline";
 
+import Sidebar from "../../components/Sidebar";
+import { useAuth } from "../../context/AuthContext";
+import { getAdminStats } from "../../services/api";
+
+const StatCard = ({ title, value, icon: Icon, color, linkTo, isLoading }) => (
+  <Link to={linkTo} className="block bg-white p-6 rounded-xl shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1">
+    <div className="flex items-center justify-between">
+      <div>
+        <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">{title}</p>
+        <p className="text-3xl font-bold text-gray-800 mt-1">{isLoading ? '...' : value}</p>
+      </div>
+      <div className={`p-3 bg-${color}-100 rounded-full`}>
+        <Icon className={`h-8 w-8 text-${color}-600`} />
+      </div>
+    </div>
+  </Link>
+);
+
+
 export default function AdminDashboard() {
-  const [userCount, setUserCount] = useState(null);
-  const [productCount, setProductCount] = useState(null);
-  const [orderCount, setOrderCount] = useState(null);
-  const [contactMessageCount, setContactMessageCount] = useState(null);
+  const { currentUser } = useAuth();
+  const [stats, setStats] = useState({ userCount: 0, productCount: 0, orderCount: 0, messageCount: 0 });
   const [isLoading, setIsLoading] = useState(true);
-  const [dashboardError, setDashboardError] = useState(null);
+  const [error, setError] = useState(null);
+
+  const fetchStats = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const [usersResp, productsResp, ordersResp, messagesResp] = await getAdminStats();
+      setStats({
+        userCount: usersResp.data.count,
+        productCount: productsResp.data.count,
+        orderCount: ordersResp.data.count,
+        messageCount: messagesResp.data.count,
+      });
+    } catch (err) {
+      console.error("AdminDashboard: Error loading stats", err);
+      setError("Failed to load dashboard data. Please ensure you are logged in as an Admin.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const fetchDashboardStats = async () => {
-      setIsLoading(true);
-      setDashboardError(null);
-      try {
-        // Assuming backend endpoints exist to fetch counts
-        const [
-          usersResp,
-          productsResp,
-          ordersResp,
-          contactMessagesResp,
-        ] = await Promise.all([
-          apiClient.get("/admin/users/count"),
-          apiClient.get("/admin/products/count"),
-          apiClient.get("/admin/orders/count"),
-          apiClient.get("/admin/contact-messages/count"),
-        ]);
-
-        setUserCount(usersResp.data.count);
-        setProductCount(productsResp.data.count);
-        setOrderCount(ordersResp.data.count);
-        setContactMessageCount(contactMessagesResp.data.count);
-      } catch (error) {
-        console.error("AdminDashboard: Error loading stats", error.response?.data || error.message);
-        setDashboardError(error.response?.data?.message || "Failed to load dashboard data.");
-        toast.error("Failed to load admin dashboard.");
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchDashboardStats();
-  }, []);
+    fetchStats();
+  }, [fetchStats]);
 
   return (
     <div className="flex min-h-screen bg-gray-100">
       <Sidebar />
       <main className="flex-1 p-6 sm:p-8">
-        <h1 className="text-3xl font-bold mb-8 text-gray-800">Admin Dashboard</h1>
+        <header className="mb-8">
+            <h1 className="text-3xl font-bold text-gray-800">Admin Dashboard</h1>
+            <p className="text-sm text-gray-500 mt-1">
+              Welcome, {currentUser?.firstName || 'Admin'}. Here is the overview of the platform.
+            </p>
+        </header>
 
-        {dashboardError && (
-          <div className="p-4 mb-6 text-red-700 bg-red-100 rounded shadow">
-            Error: {dashboardError}
+        {error && (
+          <div className="p-4 mb-6 text-red-800 bg-red-100 rounded-lg shadow flex items-center">
+            <ExclamationTriangleIcon className="h-6 w-6 mr-3"/>
+            <div>
+                <span className="font-medium">Error:</span> {error}
+            </div>
           </div>
         )}
 
-        {isLoading ? (
-          <div className="text-center text-gray-600 animate-pulse">
-            Loading dashboard data...
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div className="bg-white p-6 rounded-lg shadow border border-gray-200 flex items-center space-x-4">
-              <UserGroupIcon className="h-10 w-10 text-blue-600" />
-              <div>
-                <p className="text-sm text-gray-500">Total Users</p>
-                <p className="text-2xl font-semibold text-gray-800">{userCount ?? 0}</p>
-              </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <StatCard title="Total Users" value={stats.userCount} icon={UserGroupIcon} color="blue" linkTo="/admin/users" isLoading={isLoading} />
+            <StatCard title="Total Products" value={stats.productCount} icon={ArchiveBoxIcon} color="green" linkTo="/admin/products" isLoading={isLoading} />
+            <StatCard title="Total Orders" value={stats.orderCount} icon={ClipboardDocumentListIcon} color="purple" linkTo="/admin/orders" isLoading={isLoading} />
+            <StatCard title="Contact Messages" value={stats.messageCount} icon={EnvelopeIcon} color="red" linkTo="/admin/contact-messages" isLoading={isLoading} />
+        </div>
+        
+        <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="bg-white p-6 rounded-xl shadow-lg">
+                <h2 className="text-xl font-semibold text-gray-700 mb-4">Quick Actions</h2>
+                <div className="grid grid-cols-2 gap-4">
+                    <Link to="/admin/users" className="p-4 text-center bg-gray-50 hover:bg-gray-100 rounded-lg">Manage Users</Link>
+                    <Link to="/admin/products" className="p-4 text-center bg-gray-50 hover:bg-gray-100 rounded-lg">Manage Products</Link>
+                    <Link to="/admin/orders" className="p-4 text-center bg-gray-50 hover:bg-gray-100 rounded-lg">Manage Orders</Link>
+                    <Link to="/admin/settings" className="p-4 text-center bg-gray-50 hover:bg-gray-100 rounded-lg">System Settings</Link>
+                </div>
             </div>
-            <div className="bg-white p-6 rounded-lg shadow border border-gray-200 flex items-center space-x-4">
-              <ArchiveBoxIcon className="h-10 w-10 text-green-600" />
-              <div>
-                <p className="text-sm text-gray-500">Total Products</p>
-                <p className="text-2xl font-semibold text-gray-800">{productCount ?? 0}</p>
-              </div>
-            </div>
-            <div className="bg-white p-6 rounded-lg shadow border border-gray-200 flex items-center space-x-4">
-              <ClipboardDocumentListIcon className="h-10 w-10 text-purple-600" />
-              <div>
-                <p className="text-sm text-gray-500">Total Orders</p>
-                <p className="text-2xl font-semibold text-gray-800">{orderCount ?? 0}</p>
-              </div>
-            </div>
-            <div className="bg-white p-6 rounded-lg shadow border border-gray-200 flex items-center space-x-4">
-              <EnvelopeIcon className="h-10 w-10 text-red-600" />
-              <div>
-                <p className="text-sm text-gray-500">Contact Messages</p>
-                <p className="text-2xl font-semibold text-gray-800">{contactMessageCount ?? 0}</p>
-              </div>
-            </div>
-          </div>
-        )}
+             <div className="bg-white p-6 rounded-xl shadow-lg">
+                <h2 className="text-xl font-semibold text-gray-700 mb-4">System Status</h2>
+                <p className="text-sm text-gray-600">All systems are currently operational.</p>
+             </div>
+        </div>
+
       </main>
     </div>
   );
 }
-

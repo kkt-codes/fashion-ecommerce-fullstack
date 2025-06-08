@@ -1,7 +1,9 @@
 import React from 'react';
-import { Routes, Route, Outlet } from "react-router-dom"; // Added Outlet for nested routes if needed
+import { Routes, Route } from "react-router-dom";
 
-// --- Page Imports ---
+// --- Helper & Page Imports ---
+import ProtectedRoute from '../components/ProtectedRoute';
+
 // Public Pages
 import Home from "../pages/Home";
 import ProductList from "../pages/ProductList";
@@ -10,6 +12,9 @@ import CartPage from "../pages/Cart";
 import AboutPage from "../pages/About";
 import ContactPage from "../pages/Contact";
 import NotFoundPage from "../pages/NotFound";
+
+// Payment Page
+import PaymentPage from "../pages/PaymentPage";
 
 // Authenticated User Pages (Generic)
 import UserProfileEditPage from "../pages/profile/UserProfileEditPage";
@@ -23,31 +28,19 @@ import BuyerReviewsPage from "../pages/buyer/BuyerReviewsPage";
 
 // Seller Pages
 import SellerDashboard from "../pages/seller/SellerDashboard";
-import SellerProductsPage from "../pages/seller/SellerProducts"; // Manages own products
-import SellerAddProductPage from "../pages/seller/AddProduct";    // Specific page to add product
-import SellerEditProductPage from "../pages/seller/EditProduct";  // Specific page to edit product
-import SellerOrdersPage from "../pages/seller/SellerOrdersPage";   // Orders containing seller's products
+import SellerProductsPage from "../pages/seller/SellerProducts";
+import SellerAddProductPage from "../pages/seller/AddProduct";
+import SellerEditProductPage from "../pages/seller/EditProduct";
+import SellerOrdersPage from "../pages/seller/SellerOrdersPage";
 import SellerMessagesPage from "../pages/seller/SellerMessages";
 
 // Admin Pages
 import AdminDashboard from "../pages/admin/AdminDashboard";
 import AdminUserManagementPage from "../pages/admin/AdminUserManagement";
-import AdminProductManagementPage from "../pages/admin/AdminProductManagement"; // View/manage all products
-import AdminOrderManagementPage from "../pages/admin/AdminOrderManagement";   // View/manage all orders
+import AdminProductManagementPage from "../pages/admin/AdminProductManagement";
+import AdminOrderManagementPage from "../pages/admin/AdminOrderManagement";
 import AdminContactMessagesPage from "../pages/admin/AdminContactMessages";
 import AdminSettingsPage from "../pages/admin/AdminSettings";
-// Example: import AdminSystemLogsPage from "../pages/admin/AdminSystemLogsPage";
-
-
-// --- Protected Route Component Imports ---
-import SellerProtectedRoute from "../components/SellerProtectedRoute"; // Assuming this is for Sellers
-import BuyerProtectedRoute from "../components/BuyerProtectedRoute";
-import AdminProtectedRoute from "../components/AdminProtectedRoute";
-import AuthenticatedRoute from "../components/AuthenticatedRoute";
-
-// --- Layout Components (Optional but common for dashboards) ---
-// Example: You might have a DashboardLayout that includes the Sidebar
-// import DashboardLayout from "../layouts/DashboardLayout"; 
 
 export default function AppRoutes() {
   return (
@@ -60,48 +53,39 @@ export default function AppRoutes() {
       <Route path="/about" element={<AboutPage />} />
       <Route path="/contact" element={<ContactPage />} />
 
-      {/* ===== Authenticated User Routes (Generic) ===== */}
-      <Route path="/profile/edit" element={
-        <AuthenticatedRoute>
-          <UserProfileEditPage />
-        </AuthenticatedRoute>
-      } />
+      {/* ===== Authenticated User Routes (any role) ===== */}
+      <Route 
+        path="/profile/edit" 
+        element={<ProtectedRoute><UserProfileEditPage /></ProtectedRoute>} 
+      />
 
       {/* ===== Buyer Protected Routes ===== */}
-      {/* Example of using a layout for buyer section:
-      <Route path="/buyer" element={<AuthenticatedRoute><DashboardLayout /></AuthenticatedRoute>}>
-        <Route path="dashboard" element={<BuyerProtectedRoute><BuyerDashboard /></BuyerProtectedRoute>} />
-        <Route path="orders" element={<BuyerProtectedRoute><BuyerOrdersPage /></BuyerProtectedRoute>} />
-        ...
-      </Route>
-      If not using a nested layout, define them individually:
-      */}
-      <Route path="/buyer/dashboard" element={<BuyerProtectedRoute><BuyerDashboard /></BuyerProtectedRoute>} />
-      <Route path="/buyer/orders" element={<BuyerProtectedRoute><BuyerOrdersPage /></BuyerProtectedRoute>} />
-      <Route path="/buyer/messages" element={<BuyerProtectedRoute><BuyerMessagesPage /></BuyerProtectedRoute>} />
-      <Route path="/buyer/favorites" element={<BuyerProtectedRoute><BuyerFavoritesPage /></BuyerProtectedRoute>} />
-      <Route path="/buyer/reviews" element={<BuyerProtectedRoute><BuyerReviewsPage /></BuyerProtectedRoute>} />
+      <Route path="/buyer/dashboard" element={<ProtectedRoute role="BUYER"><BuyerDashboard /></ProtectedRoute>} />
+      <Route path="/buyer/orders" element={<ProtectedRoute role="BUYER"><BuyerOrdersPage /></ProtectedRoute>} />
+      <Route path="/buyer/messages" element={<ProtectedRoute role="BUYER"><BuyerMessagesPage /></ProtectedRoute>} />
+      <Route path="/buyer/favorites" element={<ProtectedRoute role="BUYER"><BuyerFavoritesPage /></ProtectedRoute>} />
+      <Route path="/buyer/reviews" element={<ProtectedRoute role="BUYER"><BuyerReviewsPage /></ProtectedRoute>} />
+      {/* Add new Payment Route */}
+      <Route path="/payment" element={<ProtectedRoute role="BUYER"><PaymentPage /></ProtectedRoute>} />
 
 
       {/* ===== Seller Protected Routes ===== */}
-      <Route path="/seller/dashboard" element={<SellerProtectedRoute><SellerDashboard /></SellerProtectedRoute>} />
-      <Route path="/seller/products" element={<SellerProtectedRoute><SellerProductsPage /></SellerProtectedRoute>} />
-      <Route path="/seller/products/add" element={<SellerProtectedRoute><SellerAddProductPage /></SellerProtectedRoute>} /> {/* More specific path for adding */}
-      <Route path="/seller/products/edit/:id" element={<SellerProtectedRoute><SellerEditProductPage /></SellerProtectedRoute>} /> {/* More specific path for editing */}
-      <Route path="/seller/orders" element={<SellerProtectedRoute><SellerOrdersPage /></SellerProtectedRoute>} />
-      <Route path="/seller/messages" element={<SellerProtectedRoute><SellerMessagesPage /></SellerProtectedRoute>} />
+      <Route path="/seller/dashboard" element={<ProtectedRoute role="SELLER"><SellerDashboard /></ProtectedRoute>} />
+      <Route path="/seller/products" element={<ProtectedRoute role="SELLER"><SellerProductsPage /></ProtectedRoute>} />
+      <Route path="/seller/products/add" element={<ProtectedRoute role="SELLER"><SellerAddProductPage /></ProtectedRoute>} />
+      <Route path="/seller/products/edit/:id" element={<ProtectedRoute role="SELLER"><SellerEditProductPage /></ProtectedRoute>} />
+      <Route path="/seller/orders" element={<ProtectedRoute role="SELLER"><SellerOrdersPage /></ProtectedRoute>} />
+      <Route path="/seller/messages" element={<ProtectedRoute role="SELLER"><SellerMessagesPage /></ProtectedRoute>} />
       
-
       {/* ===== Admin Protected Routes ===== */}
-      <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboard /></AdminProtectedRoute>} />
-      <Route path="/admin/users" element={<AdminProtectedRoute><AdminUserManagementPage /></AdminProtectedRoute>} />
-      <Route path="/admin/products" element={<AdminProtectedRoute><AdminProductManagementPage /></AdminProtectedRoute>} />
-      <Route path="/admin/orders" element={<AdminProtectedRoute><AdminOrderManagementPage /></AdminProtectedRoute>} />
-      <Route path="/admin/contact-messages" element={<AdminProtectedRoute><AdminContactMessagesPage /></AdminProtectedRoute>} />
-      <Route path="/admin/settings" element={<AdminProtectedRoute><AdminSettingsPage /></AdminProtectedRoute>} />
-      {/* <Route path="/admin/logs" element={<AdminProtectedRoute><AdminSystemLogsPage /></AdminProtectedRoute>} /> */}
+      <Route path="/admin/dashboard" element={<ProtectedRoute role="ADMIN"><AdminDashboard /></ProtectedRoute>} />
+      <Route path="/admin/users" element={<ProtectedRoute role="ADMIN"><AdminUserManagementPage /></ProtectedRoute>} />
+      <Route path="/admin/products" element={<ProtectedRoute role="ADMIN"><AdminProductManagementPage /></ProtectedRoute>} />
+      <Route path="/admin/orders" element={<ProtectedRoute role="ADMIN"><AdminOrderManagementPage /></ProtectedRoute>} />
+      <Route path="/admin/contact-messages" element={<ProtectedRoute role="ADMIN"><AdminContactMessagesPage /></ProtectedRoute>} />
+      <Route path="/admin/settings" element={<ProtectedRoute role="ADMIN"><AdminSettingsPage /></ProtectedRoute>} />
       
-      {/* ===== Catch All Route (404) ===== */}
+      {/* ===== Catch All Route (404 Not Found) ===== */}
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
