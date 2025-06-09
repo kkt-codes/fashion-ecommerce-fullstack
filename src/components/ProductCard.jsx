@@ -56,8 +56,7 @@ export default function ProductCard({ product }) {
     }
 
     if (isCartLoading) return;
-
-    addToCart(product.id, 1);
+    addToCart(product, 1);
   };
 
   const handleToggleFavorite = (e) => {

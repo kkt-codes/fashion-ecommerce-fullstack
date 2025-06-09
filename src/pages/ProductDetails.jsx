@@ -14,10 +14,9 @@ import { useAuth } from "../context/AuthContext";
 import { useCart } from "../context/CartContext";
 import { useFavorites } from "../context/FavoritesContext";
 import { useSignupSigninModal } from "../hooks/useSignupSigninModal";
-import { getProductById, getProductReviews, addProductReview } from "../services/api";
+import { getProductById, getProductReviews, addProductReview, checkPurchaseStatus } from "../services/api";
 import ReviewCard from "../components/ReviewCard";
 import AddReviewForm from "../components/AddReviewForm";
-// --- 1. IMPORT THE NEW COMPONENT ---
 import ContactSellerButton from "../components/ContactSellerButton";
 
 export default function ProductDetails() {
@@ -26,9 +25,9 @@ export default function ProductDetails() {
   const [product, setProduct] = useState(null);
   const [reviews, setReviews] = useState([]);
   const [quantity, setQuantity] = useState(1);
-  
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [hasPurchased, setHasPurchased] = useState(false);
 
   const { addToCart, isLoading: isCartLoading } = useCart();
   const { isFavorite, toggleFavorite, isLoading: isFavoritesLoading } = useFavorites();
@@ -43,6 +42,7 @@ export default function ProductDetails() {
     }
     setIsLoading(true);
     setError(null);
+    setHasPurchased(false); // Reset on each fetch
     try {
       const [productRes, reviewsRes] = await Promise.all([
         getProductById(productId),
@@ -50,6 +50,18 @@ export default function ProductDetails() {
       ]);
       setProduct(productRes.data);
       setReviews(reviewsRes.data || []);
+
+      // After fetching product, check if the authenticated user has purchased it
+      if (isAuthenticated && userRole === 'BUYER') {
+        try {
+          const purchaseStatusRes = await checkPurchaseStatus(productId);
+          setHasPurchased(purchaseStatusRes.data.hasPurchased);
+        } catch (purchaseError) {
+          console.error("Could not verify purchase status:", purchaseError);
+          setHasPurchased(false); // Default to false on error
+        }
+      }
+
     } catch (err) {
       console.error("ProductDetails: Error fetching data:", err);
       setError(err.response?.data?.message || "Failed to load product details.");
@@ -57,7 +69,8 @@ export default function ProductDetails() {
     } finally {
       setIsLoading(false);
     }
-  }, [productId]);
+    // Add isAuthenticated and userRole to dependency array to refetch purchase status on login/logout
+  }, [productId, isAuthenticated, userRole]);
 
   useEffect(() => {
     fetchData();
@@ -78,7 +91,7 @@ export default function ProductDetails() {
         toast.error("Only buyers can add items to the cart.");
         return;
     }
-    addToCart(product.id, quantity);
+    addToCart(product, quantity); // Corrected this from a previous step to pass the full object
   };
 
   const handleReviewSubmit = async (reviewData) => {
@@ -178,8 +191,6 @@ export default function ProductDetails() {
                     {isOutOfStock ? 'Out of Stock' : (isCartLoading ? 'Adding...' : 'Add to Cart')}
                   </button>
               )}
-              {/* --- 2. ADD THE COMPONENT TO THE UI --- */}
-              {/* This component will only render if the conditions inside it are met (e.g., user is a buyer and not the seller of the product) */}
               <ContactSellerButton 
                 sellerId={product.sellerId}
                 productName={product.name}
@@ -195,13 +206,35 @@ export default function ProductDetails() {
           ) : (
             <p className="text-gray-600 py-4">No reviews yet for this product. Be the first to write one!</p>
           )}
-          {isAuthenticated && userRole === 'BUYER' ? (
-            <div className="mt-10 pt-6 border-t border-gray-200"><AddReviewForm onSubmitReview={handleReviewSubmit} /></div>
-          ) : (
-             userRole !== 'SELLER' && <p className="mt-8 text-sm text-gray-600 py-4">
-              <button onClick={() => openModal('signin')} className="text-blue-600 hover:underline font-medium">Sign in</button> as a buyer to write a review.
-            </p>
-          )}
+
+          {/* --- Conditional Rendering Logic for Review Form --- */}
+          {(() => {
+            if (isAuthenticated && userRole === 'BUYER') {
+              // If logged-in buyer has purchased the item, show the form
+              if (hasPurchased) {
+                return (
+                  <div className="mt-10 pt-6 border-t border-gray-200">
+                    <AddReviewForm onSubmitReview={handleReviewSubmit} />
+                  </div>
+                );
+              }
+              // If logged-in buyer has NOT purchased, show a message
+              return (
+                <p className="mt-8 text-sm text-gray-600 py-4">
+                  You must purchase this item to write a review.
+                </p>
+              );
+            } else if (userRole !== 'SELLER') {
+              // If user is a guest or any role other than SELLER, show sign-in prompt
+              return (
+                <p className="mt-8 text-sm text-gray-600 py-4">
+                  <button onClick={() => openModal('signin')} className="text-blue-600 hover:underline font-medium">Sign in</button> as a buyer to write a review.
+                </p>
+              );
+            }
+            // Return null to show nothing for Sellers or other roles
+            return null;
+          })()}
         </div>
       </div>
     </div>

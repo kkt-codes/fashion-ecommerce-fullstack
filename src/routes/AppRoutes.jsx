@@ -41,6 +41,7 @@ import AdminProductManagementPage from "../pages/admin/AdminProductManagement";
 import AdminOrderManagementPage from "../pages/admin/AdminOrderManagement";
 import AdminContactMessagesPage from "../pages/admin/AdminContactMessages";
 import AdminSettingsPage from "../pages/admin/AdminSettings";
+import AdminDeliveryManagementPage from "../pages/admin/AdminDeliveryManagement";
 
 export default function AppRoutes() {
   return (
@@ -65,7 +66,6 @@ export default function AppRoutes() {
       <Route path="/buyer/messages" element={<ProtectedRoute role="BUYER"><BuyerMessagesPage /></ProtectedRoute>} />
       <Route path="/buyer/favorites" element={<ProtectedRoute role="BUYER"><BuyerFavoritesPage /></ProtectedRoute>} />
       <Route path="/buyer/reviews" element={<ProtectedRoute role="BUYER"><BuyerReviewsPage /></ProtectedRoute>} />
-      {/* Add new Payment Route */}
       <Route path="/payment" element={<ProtectedRoute role="BUYER"><PaymentPage /></ProtectedRoute>} />
 
 
@@ -84,6 +84,7 @@ export default function AppRoutes() {
       <Route path="/admin/orders" element={<ProtectedRoute role="ADMIN"><AdminOrderManagementPage /></ProtectedRoute>} />
       <Route path="/admin/contact-messages" element={<ProtectedRoute role="ADMIN"><AdminContactMessagesPage /></ProtectedRoute>} />
       <Route path="/admin/settings" element={<ProtectedRoute role="ADMIN"><AdminSettingsPage /></ProtectedRoute>} />
+      <Route path="/admin/deliveries" element={<ProtectedRoute role="ADMIN"><AdminDeliveryManagementPage /></ProtectedRoute>} />
       
       {/* ===== Catch All Route (404 Not Found) ===== */}
       <Route path="*" element={<NotFoundPage />} />

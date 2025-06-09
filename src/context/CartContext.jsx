@@ -26,9 +26,11 @@ export const CartProvider = ({ children }) => {
   const [isLoading, setIsLoading] = useState(false);
   const { isAuthenticated, currentUser, userRole, isLoading: isAuthLoading } = useAuth();
 
-  // Fetches the user's cart from the backend and updates the state.
   const fetchUserCart = useCallback(async () => {
-    if (!isAuthenticated || userRole !== 'BUYER') return;
+    if (!isAuthenticated || userRole !== 'BUYER') {
+        setCartItems([]); // Ensure non-buyers have an empty cart
+        return;
+    }
     
     setIsLoading(true);
     try {
@@ -42,16 +44,12 @@ export const CartProvider = ({ children }) => {
     }
   }, [isAuthenticated, userRole]);
 
-  // Main effect to synchronize cart state based on authentication status.
   useEffect(() => {
     const syncCart = async () => {
-      // Wait for authentication to be resolved
       if (isAuthLoading) return;
 
       if (isAuthenticated && currentUser) {
-        // User is logged in, check their role
         if (userRole === 'BUYER') {
-          // If the user is a BUYER, proceed with cart merging and fetching.
           const guestCart = JSON.parse(localStorage.getItem(GUEST_CART_STORAGE_KEY) || '[]');
           
           if (guestCart.length > 0) {
@@ -71,14 +69,11 @@ export const CartProvider = ({ children }) => {
           }
           await fetchUserCart();
         } else {
-          // If user is a SELLER or ADMIN, they don't have a cart.
-          // Clear any guest cart from local storage and ensure their app state has an empty cart.
           localStorage.removeItem(GUEST_CART_STORAGE_KEY);
           setCartItems([]);
         }
         
       } else {
-        // User is a guest, load cart from localStorage
         const guestCart = JSON.parse(localStorage.getItem(GUEST_CART_STORAGE_KEY) || '[]');
         setCartItems(guestCart);
       }
@@ -87,7 +82,7 @@ export const CartProvider = ({ children }) => {
     syncCart();
   }, [isAuthenticated, currentUser, userRole, isAuthLoading, fetchUserCart]);
 
-    const addToCart = useCallback(async (productId, quantity) => {
+  const addToCart = useCallback(async (product, quantity) => {
     if (isAuthenticated && userRole !== 'BUYER') {
         toast.error("Only buyers can add items to a cart.");
         return;
@@ -95,11 +90,10 @@ export const CartProvider = ({ children }) => {
 
     setIsLoading(true);
     if (isAuthenticated && currentUser) {
-      // Authenticated user: call API
       try {
-        await apiAddToCart({ userId: currentUser.id, productId, quantity });
-        await fetchUserCart(); // Refresh cart from backend to ensure consistency
-        toast.success("Item added to cart!");
+        await apiAddToCart({ userId: currentUser.id, productId: product.id, quantity });
+        await fetchUserCart(); // Refresh cart from server
+        toast.success(`${product.name} added to cart!`);
       } catch (error) {
         console.error("CartContext: Failed to add item", error);
         toast.error(error.response?.data?.message || "Could not add item to cart.");
@@ -107,22 +101,27 @@ export const CartProvider = ({ children }) => {
     } else {
       // Guest user: update localStorage
       setCartItems(prevItems => {
-        const existingItem = prevItems.find(item => item.productId === productId);
+        const existingItem = prevItems.find(item => item.productId === product.id);
         let newItems;
         if (existingItem) {
           newItems = prevItems.map(item =>
-            item.productId === productId ? { ...item, quantity: item.quantity + quantity } : item
+            item.productId === product.id ? { ...item, quantity: item.quantity + quantity } : item
           );
         } else {
-          // This part of the logic implies that the `product` object is passed to `addToCart`
-          // for guests. This is a note for future implementation if needed.
-          toast.error("Guest cart requires full product details to add.");
-          newItems = prevItems;
+          const newItem = {
+              productId: product.id,
+              productName: product.name,
+              price: product.price,
+              photoUrl: product.photoUrl,
+              category: product.category,
+              quantity: quantity
+          };
+          newItems = [...prevItems, newItem];
         }
         localStorage.setItem(GUEST_CART_STORAGE_KEY, JSON.stringify(newItems));
         return newItems;
       });
-      toast.success("Item added to guest cart!");
+      toast.success(`${product.name} added to guest cart!`);
     }
     setIsLoading(false);
   }, [isAuthenticated, currentUser, userRole, fetchUserCart]);
@@ -130,25 +129,24 @@ export const CartProvider = ({ children }) => {
   const removeFromCart = useCallback(async (cartItemId) => {
     setIsLoading(true);
     if (isAuthenticated) {
-      // This is safe because only a buyer's cart will have items with DB IDs
       try {
         await apiRemoveCartItem(cartItemId);
-        setCartItems(prev => prev.filter(item => item.id !== cartItemId));
+        await fetchUserCart(); // REFETCH instead of optimistic update
         toast.success("Item removed from cart.");
       } catch (error) {
         console.error("CartContext: Failed to remove item", error);
         toast.error("Could not remove item from cart.");
       }
     } else {
-      // For guest, cartItemId is actually productId
       setCartItems(prev => {
         const newItems = prev.filter(item => item.productId !== cartItemId);
         localStorage.setItem(GUEST_CART_STORAGE_KEY, JSON.stringify(newItems));
         return newItems;
       });
+      toast.success("Item removed from cart.");
     }
     setIsLoading(false);
-  }, [isAuthenticated]);
+  }, [isAuthenticated, fetchUserCart]);
 
   const updateQuantity = useCallback(async (cartItemId, quantity) => {
     if (quantity <= 0) {
@@ -159,31 +157,28 @@ export const CartProvider = ({ children }) => {
     if (isAuthenticated) {
       try {
         await apiUpdateQuantity(cartItemId, quantity);
-        setCartItems(prev => prev.map(item => item.id === cartItemId ? { ...item, quantity } : item));
+        await fetchUserCart(); // REFETCH instead of optimistic update
         toast.success("Quantity updated.");
       } catch (error) {
         console.error("CartContext: Failed to update quantity", error);
         toast.error("Could not update quantity.");
       }
     } else {
-       // For guest, cartItemId is actually productId
       setCartItems(prev => {
-         const newItems = prev.map(item => item.productId === cartItemId ? { ...item, quantity } : item);
+         const newItems = prev.map(item => (item.productId === cartItemId ? { ...item, quantity } : item));
          localStorage.setItem(GUEST_CART_STORAGE_KEY, JSON.stringify(newItems));
          return newItems;
       });
     }
     setIsLoading(false);
-  }, [isAuthenticated, removeFromCart]);
+  }, [isAuthenticated, fetchUserCart, removeFromCart]);
 
   const clearCart = useCallback(async () => {
     setIsLoading(true);
     if (isAuthenticated) {
       try {
-        // Safe to call, as backend should handle non-buyer requests gracefully,
-        // but our logic ensures this is only meaningfully called by a buyer.
         await apiClearMyCart();
-        setCartItems([]);
+        setCartItems([]); // Can safely set to empty after successful API call
         toast.success("Cart has been cleared.");
       } catch (error) {
         console.error("CartContext: Failed to clear cart", error);
@@ -214,7 +209,7 @@ export const CartProvider = ({ children }) => {
     clearCart,
     getCartTotal,
     getItemCount,
-    fetchUserCart, // Exposing this for potential manual refresh
+    fetchUserCart,
   };
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

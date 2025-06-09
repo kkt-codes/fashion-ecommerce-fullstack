@@ -88,6 +88,10 @@ export const getMyBuyerOrders = (params) => apiClient.get('/orders/user/me', { p
 export const getMySellerOrders = (params) => apiClient.get('/orders/seller/me', { params });
 export const updateOrderStatus = (orderId, status) => apiClient.patch(`/orders/${orderId}`, { status });
 export const getDeliveryOptions = () => apiClient.get('/deliveries');
+export const createDelivery = (deliveryData) => apiClient.post('/deliveries', deliveryData);
+export const updateDelivery = (id, deliveryData) => apiClient.put(`/deliveries/${id}`, deliveryData);
+export const deleteDelivery = (id) => apiClient.delete(`/deliveries/${id}`);
+export const checkPurchaseStatus = (productId) => apiClient.get(`/orders/user/has-purchased/${productId}`);
 
 // -- Review Service --
 export const getProductReviews = (productId) => apiClient.get(`/reviews/product/${productId}`);
@@ -102,6 +106,7 @@ export const getMyConversations = () => apiClient.get('/chat/user/me/conversatio
 export const getMessagesForConversation = (conversationId) => apiClient.get(`/chat/conversation/${conversationId}/messages`);
 export const startConversation = (user1Id, user2Id) => apiClient.post(`/chat/start?user1Id=${user1Id}&user2Id=${user2Id}`);
 export const sendRestMessage = (messageData) => apiClient.post('/chat/message', messageData);
+export const markConversationAsRead = (conversationId) => apiClient.post(`/chat/conversation/${conversationId}/mark-as-read`);
 
 // -- Payment Service --
 export const processPayment = (paymentData) => apiClient.post('/payments/process', paymentData);

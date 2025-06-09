@@ -1,4 +1,6 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
+import Stomp from 'stompjs';
+import SockJS from 'sockjs-client';
 import Sidebar from "../../components/Sidebar";
 import {
   EnvelopeIcon,
@@ -9,25 +11,20 @@ import toast from "react-hot-toast";
 
 import { getContactMessages, updateContactMessageStatus, deleteContactMessage } from "../../services/api";
 
-const MESSAGES_PER_PAGE = 10;
-
 export default function AdminContactMessagesPage() {
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
-  
-  // Note: Pagination state can be added here if the API supports it.
-  // For simplicity, this refactored version fetches all messages.
+  const stompClientRef = useRef(null);
 
   const fetchMessages = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      // Assuming the endpoint returns all messages, not a paginated response.
-      // If paginated, you would pass params: getContactMessages({ page: currentPage, size: MESSAGES_PER_PAGE })
       const { data } = await getContactMessages();
-      // The backend returns a simple list, not a page object for this endpoint
-      setMessages(data || []);
+      // Sort messages by creation date, newest first
+      const sortedData = (data || []).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      setMessages(sortedData);
     } catch (err) {
       const errorMsg = err.response?.data?.message || "Failed to load contact messages.";
       setError(errorMsg);
@@ -41,12 +38,55 @@ export default function AdminContactMessagesPage() {
     fetchMessages();
   }, [fetchMessages]);
 
+  // --- START OF REFACTOR: Real-time message listener ---
+  useEffect(() => {
+    // Establish WebSocket connection
+    const socket = new SockJS('http://localhost:8080/ws');
+    const client = Stomp.over(socket);
+    stompClientRef.current = client;
+
+    const onNewMessageReceived = (message) => {
+        const newContactMessage = JSON.parse(message.body);
+        
+        // Add the new message to the top of the list
+        setMessages(prevMessages => [newContactMessage, ...prevMessages]);
+
+        // Notify the admin
+        toast.success(`New message from ${newContactMessage.senderName}`, {
+            icon: '📩',
+        });
+    };
+
+    client.connect({}, 
+      () => {
+        console.log('STOMP (Admin): Connected');
+        // Subscribe to the topic the backend sends new contact messages to
+        client.subscribe('/topic/admin/newContactMessage', onNewMessageReceived);
+      },
+      (error) => {
+        console.error("STOMP (Admin): Connection error", error);
+        toast.error("Could not connect to real-time message service.");
+      }
+    );
+
+    // Cleanup on component unmount
+    return () => {
+        if (stompClientRef.current?.connected) {
+            stompClientRef.current.disconnect(() => console.log('STOMP (Admin): Disconnected'));
+        }
+    };
+  }, []); 
+  // Empty dependency array ensures this runs only once on mount
+
+  // --- END OF REFACTOR ---
+
   const handleUpdateStatus = async (messageId, newStatus) => {
     const toastId = toast.loading("Updating status...");
     try {
       await updateContactMessageStatus(messageId, newStatus);
       toast.success(`Message marked as ${newStatus}.`, { id: toastId });
-      fetchMessages(); // Refresh the list
+      // Update the status locally instead of a full refetch
+      setMessages(prev => prev.map(msg => msg.id === messageId ? { ...msg, status: newStatus } : msg));
     } catch (err) {
       toast.error("Failed to update status.", { id: toastId });
     }
@@ -64,7 +104,8 @@ export default function AdminContactMessagesPage() {
               try {
                 await deleteContactMessage(messageId);
                 toast.success('Message deleted.', { id: deleteToast });
-                fetchMessages();
+                // Remove the message locally instead of a full refetch
+                setMessages(prev => prev.filter(msg => msg.id !== messageId));
               } catch (err) {
                 toast.error('Failed to delete message.', { id: deleteToast });
               }
@@ -97,7 +138,13 @@ export default function AdminContactMessagesPage() {
 
         {isLoading ? <p>Loading messages...</p> :
          error ? <p className="text-red-500">{error}</p> :
-         messages.length === 0 ? <p>No contact messages found.</p> :
+         messages.length === 0 ? (
+            <div className="text-center py-16">
+                <EnvelopeIcon className="mx-auto h-16 w-16 text-gray-300" />
+                <h2 className="mt-4 text-xl font-semibold text-gray-700">Inbox Zero</h2>
+                <p className="mt-1 text-gray-500">No contact messages found.</p>
+            </div>
+         ) :
          (
             <div className="space-y-4">
               {messages.map((msg) => (

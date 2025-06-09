@@ -16,6 +16,7 @@ import {
   WrenchScrewdriverIcon,
   ShieldCheckIcon,
   StarIcon,
+  TruckIcon,
 } from "@heroicons/react/24/outline";
 import { useAuth } from '../context/AuthContext';
 
@@ -42,6 +43,7 @@ const navConfig = {
     { label: "Products", path: "/admin/products", icon: ArchiveBoxIcon },
     { label: "Orders", path: "/admin/orders", icon: ClipboardDocumentListIcon },
     { label: "Messages", path: "/admin/contact-messages", icon: EnvelopeIcon },
+    { label: "Delivery", path: "/admin/deliveries", icon: TruckIcon },
     { label: "Settings", path: "/admin/settings", icon: WrenchScrewdriverIcon },
   ]
 };

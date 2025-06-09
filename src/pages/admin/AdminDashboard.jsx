@@ -38,12 +38,20 @@ export default function AdminDashboard() {
     setError(null);
     try {
       const [usersResp, productsResp, ordersResp, messagesResp] = await getAdminStats();
+      
+      // Correctly extract the count from each API response
+      const userCount = Array.isArray(usersResp.data) ? usersResp.data.length : 0;
+      const productCount = productsResp.data?.totalElements || 0;
+      const orderCount = Array.isArray(ordersResp.data) ? ordersResp.data.length : 0;
+      const messageCount = Array.isArray(messagesResp.data) ? messagesResp.data.length : 0;
+
       setStats({
-        userCount: usersResp.data.count,
-        productCount: productsResp.data.count,
-        orderCount: ordersResp.data.count,
-        messageCount: messagesResp.data.count,
+        userCount,
+        productCount,
+        orderCount,
+        messageCount,
       });
+
     } catch (err) {
       console.error("AdminDashboard: Error loading stats", err);
       setError("Failed to load dashboard data. Please ensure you are logged in as an Admin.");
