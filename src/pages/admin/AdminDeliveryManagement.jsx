@@ -5,21 +5,24 @@ import { TruckIcon, PencilIcon, TrashIcon, XMarkIcon, PlusCircleIcon } from '@he
 import Sidebar from '../../components/Sidebar';
 import { getDeliveryOptions, createDelivery, updateDelivery, deleteDelivery } from '../../services/api';
 
-// Modal component for Creating and Editing Delivery Options
 const DeliveryModal = ({ option, onClose, onSave }) => {
     const [formData, setFormData] = useState({
         type: '',
-        deliveryCost: ''
+        deliveryCost: '',
+        minDeliveryDays: '',
+        maxDeliveryDays: ''
     });
 
     useEffect(() => {
         if (option) {
             setFormData({
                 type: option.type || '',
-                deliveryCost: option.deliveryCost || ''
+                deliveryCost: option.deliveryCost || '',
+                minDeliveryDays: option.minDeliveryDays || '',
+                maxDeliveryDays: option.maxDeliveryDays || ''
             });
         } else {
-            setFormData({ type: '', deliveryCost: '' });
+            setFormData({ type: '', deliveryCost: '', minDeliveryDays: '', maxDeliveryDays: '' });
         }
     }, [option]);
 
@@ -33,8 +36,10 @@ const DeliveryModal = ({ option, onClose, onSave }) => {
         const toastId = toast.loading(option ? 'Updating option...' : 'Creating option...');
         try {
             const saveData = {
-                ...formData,
+                type: formData.type,
                 deliveryCost: parseFloat(formData.deliveryCost) || 0,
+                minDeliveryDays: parseInt(formData.minDeliveryDays, 10) || 1,
+                maxDeliveryDays: parseInt(formData.maxDeliveryDays, 10) || 1,
             };
 
             if (option && option.id) {
@@ -43,8 +48,8 @@ const DeliveryModal = ({ option, onClose, onSave }) => {
                 await createDelivery(saveData);
             }
             toast.success('Delivery option saved successfully!', { id: toastId });
-            onSave(); // Refresh the list
-            onClose(); // Close the modal
+            onSave();
+            onClose();
         } catch (error) {
             toast.error(error.response?.data?.message || 'Failed to save option.', { id: toastId });
         }
@@ -66,6 +71,14 @@ const DeliveryModal = ({ option, onClose, onSave }) => {
                         <label className="block text-sm font-medium text-gray-700">Cost ($)</label>
                         <input type="number" name="deliveryCost" value={formData.deliveryCost} onChange={handleChange} placeholder="e.g., 15.99" required min="0" step="0.01" className="mt-1 block w-full border-gray-300 rounded-md shadow-sm"/>
                     </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">Min. Delivery Days</label>
+                        <input type="number" name="minDeliveryDays" value={formData.minDeliveryDays} onChange={handleChange} placeholder="e.g., 2" required min="1" className="mt-1 block w-full border-gray-300 rounded-md shadow-sm"/>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">Max. Delivery Days</label>
+                        <input type="number" name="maxDeliveryDays" value={formData.maxDeliveryDays} onChange={handleChange} placeholder="e.g., 3" required min="1" className="mt-1 block w-full border-gray-300 rounded-md shadow-sm"/>
+                    </div>
                     <div className="mt-6 flex justify-end gap-3">
                         <button type="button" onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Cancel</button>
                         <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Save</button>
@@ -84,14 +97,26 @@ export default function AdminDeliveryManagementPage() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingOption, setEditingOption] = useState(null);
 
+    // --- REFACTORED: Safer data fetching logic ---
     const fetchOptions = useCallback(async () => {
         setIsLoading(true);
         setError(null);
         try {
-            const { data } = await getDeliveryOptions();
-            setDeliveryOptions(data || []);
+            // The API response from axios has the actual data in a `data` property
+            const response = await getDeliveryOptions();
+            const fetchedData = response.data;
+            
+            // Ensure the data is an array before setting state
+            if (Array.isArray(fetchedData)) {
+                setDeliveryOptions(fetchedData);
+            } else {
+                console.error("API did not return an array:", fetchedData);
+                setDeliveryOptions([]); // Fallback to an empty array to prevent crash
+                setError("Received invalid data from the server.");
+            }
         } catch (err) {
             setError('Failed to load delivery options.');
+            console.error(err);
         } finally {
             setIsLoading(false);
         }
@@ -165,6 +190,7 @@ export default function AdminDeliveryManagementPage() {
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Option Name</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cost</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Est. Days</th>
                                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
                                 </tr>
                             </thead>
@@ -174,6 +200,7 @@ export default function AdminDeliveryManagementPage() {
                                         <td className="px-6 py-4 text-sm text-gray-500">{option.id}</td>
                                         <td className="px-6 py-4 text-sm font-medium text-gray-900">{option.type}</td>
                                         <td className="px-6 py-4 text-sm text-gray-500">${option.deliveryCost.toFixed(2)}</td>
+                                        <td className="px-6 py-4 text-sm text-gray-500">{option.minDeliveryDays} - {option.maxDeliveryDays}</td>
                                         <td className="px-6 py-4 text-right text-sm font-medium space-x-4">
                                             <button onClick={() => handleOpenModal(option)} className="text-indigo-600 hover:text-indigo-900"><PencilIcon className="h-5 w-5 inline-block"/></button>
                                             <button onClick={() => handleDelete(option)} className="text-red-600 hover:text-red-900"><TrashIcon className="h-5 w-5 inline-block"/></button>

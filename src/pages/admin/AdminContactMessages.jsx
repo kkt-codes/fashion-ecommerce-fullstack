@@ -11,6 +11,19 @@ import toast from "react-hot-toast";
 
 import { getContactMessages, updateContactMessageStatus, deleteContactMessage } from "../../services/api";
 
+// Helper function to safely parse dates from the backend
+const parseJavaLocalDateTime = (dateTime) => {
+    if (!dateTime) return new Date(); // Fallback
+    // Jackson can serialize LocalDateTime as an array [y, M, d, h, m, s, ns]
+    if (Array.isArray(dateTime)) {
+        // Month is 1-based in Java, 0-based in JS Date, so subtract 1
+        return new Date(dateTime[0], dateTime[1] - 1, dateTime[2], dateTime[3], dateTime[4], dateTime[5]);
+    }
+    // It can also be a standard ISO string, which is directly parsable
+    return new Date(dateTime);
+};
+
+
 export default function AdminContactMessagesPage() {
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -22,8 +35,8 @@ export default function AdminContactMessagesPage() {
     setError(null);
     try {
       const { data } = await getContactMessages();
-      // Sort messages by creation date, newest first
-      const sortedData = (data || []).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      // Use the helper function for sorting
+      const sortedData = (data || []).sort((a, b) => parseJavaLocalDateTime(b.createdAt) - parseJavaLocalDateTime(a.createdAt));
       setMessages(sortedData);
     } catch (err) {
       const errorMsg = err.response?.data?.message || "Failed to load contact messages.";
@@ -38,29 +51,40 @@ export default function AdminContactMessagesPage() {
     fetchMessages();
   }, [fetchMessages]);
 
-  // --- START OF REFACTOR: Real-time message listener ---
   useEffect(() => {
-    // Establish WebSocket connection
+    const token = localStorage.getItem('appAuthToken');
+    if (!token) {
+        return; // Don't connect if not logged in
+    }
+    const headers = { 'Authorization': `Bearer ${token}` };
+
     const socket = new SockJS('http://localhost:8080/ws');
     const client = Stomp.over(socket);
     stompClientRef.current = client;
 
     const onNewMessageReceived = (message) => {
         const newContactMessage = JSON.parse(message.body);
-        
-        // Add the new message to the top of the list
-        setMessages(prevMessages => [newContactMessage, ...prevMessages]);
 
-        // Notify the admin
-        toast.success(`New message from ${newContactMessage.senderName}`, {
-            icon: '📩',
+        setMessages(prevMessages => {
+            // Check if a message with the same ID already exists in our state
+            const messageExists = prevMessages.some(msg => msg.id === newContactMessage.id);
+
+            if (!messageExists) {
+                // If it doesn't exist, show a notification and add it to the state
+                toast.success(`New message from ${newContactMessage.senderName}`, {
+                    icon: '📩',
+                });
+                return [newContactMessage, ...prevMessages];
+            }
+            
+            // If the message already exists, do nothing and return the state as is
+            return prevMessages;
         });
     };
 
-    client.connect({}, 
+    client.connect(headers, 
       () => {
         console.log('STOMP (Admin): Connected');
-        // Subscribe to the topic the backend sends new contact messages to
         client.subscribe('/topic/admin/newContactMessage', onNewMessageReceived);
       },
       (error) => {
@@ -69,23 +93,18 @@ export default function AdminContactMessagesPage() {
       }
     );
 
-    // Cleanup on component unmount
     return () => {
         if (stompClientRef.current?.connected) {
             stompClientRef.current.disconnect(() => console.log('STOMP (Admin): Disconnected'));
         }
     };
   }, []); 
-  // Empty dependency array ensures this runs only once on mount
-
-  // --- END OF REFACTOR ---
 
   const handleUpdateStatus = async (messageId, newStatus) => {
     const toastId = toast.loading("Updating status...");
     try {
       await updateContactMessageStatus(messageId, newStatus);
       toast.success(`Message marked as ${newStatus}.`, { id: toastId });
-      // Update the status locally instead of a full refetch
       setMessages(prev => prev.map(msg => msg.id === messageId ? { ...msg, status: newStatus } : msg));
     } catch (err) {
       toast.error("Failed to update status.", { id: toastId });
@@ -104,7 +123,6 @@ export default function AdminContactMessagesPage() {
               try {
                 await deleteContactMessage(messageId);
                 toast.success('Message deleted.', { id: deleteToast });
-                // Remove the message locally instead of a full refetch
                 setMessages(prev => prev.filter(msg => msg.id !== messageId));
               } catch (err) {
                 toast.error('Failed to delete message.', { id: deleteToast });
@@ -156,7 +174,8 @@ export default function AdminContactMessagesPage() {
                         {getStatusPill(msg.status)}
                       </div>
                       <p className="text-sm text-gray-600">From: {msg.senderName} &lt;{msg.senderEmail}&gt;</p>
-                      <p className="text-xs text-gray-400 mt-1">{new Date(msg.createdAt).toLocaleString()}</p>
+                      {/* Use the helper function for rendering the date */}
+                      <p className="text-xs text-gray-400 mt-1">{parseJavaLocalDateTime(msg.createdAt).toLocaleString()}</p>
                     </div>
                     <div className="flex items-center space-x-2 flex-shrink-0">
                       {msg.status.toLowerCase() === 'unread' && (

@@ -13,7 +13,7 @@ import toast from "react-hot-toast";
 
 import Sidebar from "../../components/Sidebar";
 import { useAuth } from "../../context/AuthContext";
-import { getMySellerProducts, getUnreadMessageCount } from "../../services/api";
+import { getMySellerProducts, getUnreadMessageCount, getMySellerSales } from "../../services/api";
 
 const StatCard = ({ title, value, icon: Icon, color, linkTo, linkText, isLoading }) => (
   <Link to={linkTo} className="block bg-white p-6 rounded-xl shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1">
@@ -33,7 +33,8 @@ const StatCard = ({ title, value, icon: Icon, color, linkTo, linkText, isLoading
 export default function SellerDashboard() {
   const { currentUser, isLoading: isAuthLoading } = useAuth();
   
-  const [stats, setStats] = useState({ productCount: 0, unreadMessageCount: 0, totalSales: "N/A" });
+  // Initialize totalSales to 0 instead of "N/A"
+  const [stats, setStats] = useState({ productCount: 0, unreadMessageCount: 0, totalSales: 0 });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -43,16 +44,18 @@ export default function SellerDashboard() {
     setIsLoading(true);
     setError(null);
     try {
-      const [productsRes, messagesRes] = await Promise.all([
-        getMySellerProducts({ size: 1 }), // Fetch with size=1 to get totalElements efficiently
+      // Add the new API call to Promise.all
+      const [productsRes, messagesRes, salesRes] = await Promise.all([
+        getMySellerProducts({ size: 1 }),
         getUnreadMessageCount(),
-        // Add promise for sales data when available
+        getMySellerSales(),
       ]);
 
+      // Update state with the fetched sales data
       setStats({
         productCount: productsRes.data?.totalElements || 0,
         unreadMessageCount: messagesRes.data?.unreadCount || 0,
-        totalSales: "N/A", // Placeholder until backend provides sales data
+        totalSales: salesRes.data?.totalSales || 0,
       });
 
     } catch (err) {
@@ -97,11 +100,17 @@ export default function SellerDashboard() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           <StatCard title="Total Products" value={stats.productCount} icon={ArchiveBoxIcon} color="blue" linkTo="/seller/products" linkText="Manage products" isLoading={isLoading} />
-          <StatCard title="Total Sales (Est.)" value={stats.totalSales} icon={CurrencyDollarIcon} color="green" linkTo="/seller/orders" linkText="View sales data" isLoading={isLoading} />
+          {/* Format the sales value as currency */}
+          <StatCard 
+            title="Total Sales" 
+            value={new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(stats.totalSales)} 
+            icon={CurrencyDollarIcon} color="green" 
+            linkTo="/seller/orders" 
+            linkText="View sales data" 
+            isLoading={isLoading} />
           <StatCard title="Unread Messages" value={stats.unreadMessageCount} icon={ChatBubbleLeftEllipsisIcon} color="purple" linkTo="/seller/messages" linkText="View messages" isLoading={isLoading} />
         </div>
         
-        {/* Placeholder for future charts or detailed reports */}
         <div className="bg-white p-6 rounded-xl shadow-lg">
            <h2 className="text-xl font-semibold text-gray-700 mb-4">Quick Links</h2>
              <ul className="space-y-3">

@@ -3,33 +3,29 @@ import { EnvelopeIcon, PhoneIcon, MapPinIcon, PaperAirplaneIcon } from '@heroico
 import toast from 'react-hot-toast';
 
 import { useAuth } from '../context/AuthContext';
-import { submitContactForm } from '../services/api'; // Import the specific service function
+import { submitContactForm } from '../services/api';
 
 const ContactPage = () => {
   const { currentUser, isAuthenticated } = useAuth();
-
-  const [formData, setFormData] = useState({ name: '', email: '', subject: '', message: '' });
+  const [formData, setFormData] = useState({ senderName: '', senderEmail: '', subject: '', message: '' });
   const [formErrors, setFormErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Effect to pre-fill the form if the user is logged in
   useEffect(() => {
     if (isAuthenticated && currentUser) {
       setFormData(prev => ({
         ...prev,
-        name: `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim(),
-        email: currentUser.email || '',
+        senderName: `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim(),
+        senderEmail: currentUser.email || '',
       }));
     } else {
-      // Reset form if user logs out
-      setFormData({ name: '', email: '', subject: '', message: '' });
+      setFormData({ senderName: '', senderEmail: '', subject: '', message: '' });
     }
   }, [isAuthenticated, currentUser]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
-    // Clear error on change
     if (formErrors[name]) {
       setFormErrors(prev => ({ ...prev, [name]: null }));
     }
@@ -37,9 +33,9 @@ const ContactPage = () => {
 
   const validateForm = () => {
     const errors = {};
-    if (!formData.name.trim()) errors.name = "Full name is required.";
-    if (!formData.email.trim()) errors.email = "Email address is required.";
-    else if (!/\S+@\S+\.\S+/.test(formData.email)) errors.email = "Invalid email format.";
+    if (!formData.senderName.trim()) errors.senderName = "Full name is required.";
+    if (!formData.senderEmail.trim()) errors.senderEmail = "Email address is required.";
+    else if (!/\S+@\S+\.\S+/.test(formData.senderEmail)) errors.senderEmail = "Invalid email format.";
     if (!formData.subject.trim()) errors.subject = "Subject is required.";
     if (!formData.message.trim() || formData.message.trim().length < 10) {
       errors.message = "Message must be at least 10 characters.";
@@ -59,14 +55,17 @@ const ContactPage = () => {
     const toastId = toast.loading("Sending your message...");
 
     try {
-      // Use the dedicated service function instead of apiClient directly
-      await submitContactForm(formData);
+      await submitContactForm({
+        senderName: formData.senderName,
+        senderEmail: formData.senderEmail,
+        subject: formData.subject,
+        message: formData.message,
+      });
       
       toast.success("Message sent successfully!", { id: toastId });
-      // Reset form, but keep pre-filled data if user is still logged in
       setFormData({
-        name: isAuthenticated && currentUser ? `${currentUser.firstName} ${currentUser.lastName}`.trim() : '',
-        email: isAuthenticated && currentUser ? currentUser.email : '',
+        senderName: isAuthenticated && currentUser ? `${currentUser.firstName} ${currentUser.lastName}`.trim() : '',
+        senderEmail: isAuthenticated && currentUser ? currentUser.email : '',
         subject: '',
         message: '',
       });
@@ -82,7 +81,6 @@ const ContactPage = () => {
   
   return (
     <div className="bg-gray-50 min-h-screen">
-      {/* Hero Section */}
       <section 
         className="relative bg-cover bg-center py-32" 
         style={{ backgroundImage: `url('/assets/contact-us/contact-hero.jpg')` }}
@@ -94,7 +92,6 @@ const ContactPage = () => {
         </div>
       </section>
 
-      {/* Contact Form and Info Section */}
       <section className="py-20">
         <div className="container mx-auto px-6">
           <div className="grid lg:grid-cols-12 gap-12">
@@ -103,14 +100,14 @@ const ContactPage = () => {
               <h2 className="text-3xl font-bold text-gray-800 mb-8">Send Us a Message</h2>
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div>
-                  <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
-                  <input type="text" name="name" id="name" value={formData.name} onChange={handleChange} required className={`w-full px-4 py-2.5 border rounded-lg focus:ring-2 ${formErrors.name ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-blue-500'}`} placeholder="John Doe" />
-                  {formErrors.name && <p className="text-xs text-red-600 mt-1">{formErrors.name}</p>}
+                  <label htmlFor="senderName" className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                  <input type="text" name="senderName" id="senderName" value={formData.senderName} onChange={handleChange} required className={`w-full px-4 py-2.5 border rounded-lg focus:ring-2 ${formErrors.senderName ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-blue-500'}`} placeholder="John Doe" />
+                  {formErrors.senderName && <p className="text-xs text-red-600 mt-1">{formErrors.senderName}</p>}
                 </div>
                 <div>
-                  <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
-                  <input type="email" name="email" id="email" value={formData.email} onChange={handleChange} required className={`w-full px-4 py-2.5 border rounded-lg focus:ring-2 ${formErrors.email ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-blue-500'}`} placeholder="you@example.com" />
-                  {formErrors.email && <p className="text-xs text-red-600 mt-1">{formErrors.email}</p>}
+                  <label htmlFor="senderEmail" className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
+                  <input type="email" name="senderEmail" id="senderEmail" value={formData.senderEmail} onChange={handleChange} required className={`w-full px-4 py-2.5 border rounded-lg focus:ring-2 ${formErrors.senderEmail ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-blue-500'}`} placeholder="you@example.com" />
+                  {formErrors.senderEmail && <p className="text-xs text-red-600 mt-1">{formErrors.senderEmail}</p>}
                 </div>
                 <div>
                   <label htmlFor="subject" className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
@@ -130,7 +127,6 @@ const ContactPage = () => {
               </form>
             </div>
 
-            {/* Contact Info */}
             <div className="lg:col-span-5">
               <div className="bg-white p-10 rounded-xl shadow-xl h-full">
                 <h2 className="text-3xl font-bold text-gray-800 mb-8">Contact Information</h2>

@@ -36,133 +36,95 @@ export default function BuyerMessagesPage() {
 
   const stompClientRef = useRef(null);
   const messagesEndRef = useRef(null);
-  
-  const selectedConvoIdRef = useRef(selectedConvoId);
-  useEffect(() => {
-    selectedConvoIdRef.current = selectedConvoId;
-  }, [selectedConvoId]);
+  const subscriptionRef = useRef(null);
+
+  const onMessageReceived = useCallback((message) => {
+    const receivedMsg = JSON.parse(message.body);
+    setMessages(prevMessages => {
+        if (prevMessages.some(msg => msg.id === receivedMsg.id)) return prevMessages;
+        return [...prevMessages, receivedMsg];
+    });
+    if (receivedMsg.senderId !== currentUser.id) {
+        markConversationAsRead(receivedMsg.conversationId);
+    }
+    setConversations(prevConvos => {
+        const updatedConvos = prevConvos.map(c => 
+            c.id === receivedMsg.conversationId ? { ...c, lastMessageContent: receivedMsg.content, lastMessageTimestamp: receivedMsg.sentAt, lastMessageSenderId: receivedMsg.senderId } : c
+        );
+        return updatedConvos.sort((a, b) => parseISO(b.lastMessageTimestamp || 0) - parseISO(a.lastMessageTimestamp || 0));
+    });
+  }, [currentUser]);
+
+  const handleSelectConversation = useCallback(async (conversationId) => {
+    if (isLoadingMessages) return;
+    if (subscriptionRef.current) {
+        subscriptionRef.current.unsubscribe();
+    }
+    setSelectedConvoId(conversationId);
+    setIsLoadingMessages(true);
+    try {
+        const { data } = await getMessagesForConversation(conversationId);
+        setMessages(data || []);
+        if (stompClientRef.current?.connected) {
+            subscriptionRef.current = stompClientRef.current.subscribe(`/topic/conversation/${conversationId}`, onMessageReceived);
+        }
+        await markConversationAsRead(conversationId);
+        setConversations(prev => prev.map(c => c.id === conversationId ? { ...c, unreadMessageCount: 0 } : c));
+    } catch (error) {
+        toast.error("Could not load messages.");
+        setMessages([]);
+    } finally {
+        setIsLoadingMessages(false);
+    }
+  }, [isLoadingMessages, onMessageReceived]);
 
   const fetchConversations = useCallback(async (convoToSelect = null) => {
     if (!currentUser) return;
     setIsLoadingConvos(true);
     try {
       const { data } = await getMyConversations();
-      const sortedData = (data || []).sort((a, b) => 
-          parseISO(b.lastMessageTimestamp || 0) - parseISO(a.lastMessageTimestamp || 0)
-      );
-      setConversations(sortedData);
+      setConversations((data || []).sort((a, b) => parseISO(b.lastMessageTimestamp || 0) - parseISO(a.lastMessageTimestamp || 0)));
       if (convoToSelect) {
-        // Automatically select the conversation after fetching
         handleSelectConversation(convoToSelect);
       }
     } catch (error) {
-      toast.error("Could not load your conversations.");
+      toast.error("Could not load conversations.");
     } finally {
       setIsLoadingConvos(false);
     }
-  }, [currentUser]); // handleSelectConversation is a useCallback, but not needed as dependency here.
-
-  const handleSelectConversation = useCallback(async (conversationId) => {
-    if (isLoadingMessages) return;
-    setSelectedConvoId(conversationId);
-    setIsLoadingMessages(true);
-    try {
-        const { data } = await getMessagesForConversation(conversationId);
-        setMessages(data || []);
-        await markConversationAsRead(conversationId);
-        setConversations(prev => prev.map(c => 
-            c.id === conversationId ? { ...c, unreadMessageCount: 0 } : c
-        ));
-    } catch (error) {
-        toast.error("Could not load messages for this conversation.");
-        setMessages([]);
-    } finally {
-        setIsLoadingMessages(false);
-    }
-  }, [isLoadingMessages]);
+  }, [currentUser, handleSelectConversation]);
 
   useEffect(() => {
-    if (!currentUser || stompClientRef.current) return;
+    const token = localStorage.getItem('appAuthToken');
+    
+    if (!currentUser || !token || stompClientRef.current) return;
 
     const socket = new SockJS('http://localhost:8080/ws');
     const client = Stomp.over(socket);
     stompClientRef.current = client;
+    const headers = { 'Authorization': `Bearer ${token}` };
 
-    // --- REFACTORED: Unified logic for all incoming messages ---
-    const onMessageReceived = (message) => {
-      const receivedMsg = JSON.parse(message.body);
-      
-      const isForCurrentConvo = receivedMsg.conversationId === selectedConvoIdRef.current;
-      
-      // Update the message pane if the conversation is open
-      if (isForCurrentConvo) {
-        setMessages(prevMessages => {
-          // Prevent duplicates
-          if (prevMessages.some(msg => msg.id === receivedMsg.id)) {
-            return prevMessages;
-          }
-          return [...prevMessages, receivedMsg];
-        });
-        
-        // Mark as read if the message is from the other user
-        if (receivedMsg.senderId !== currentUser.id) {
-          markConversationAsRead(receivedMsg.conversationId);
-        }
-      }
-      
-      // Always update the conversations list for the sidebar preview
-      setConversations(prevConvos => {
-          const convoExists = prevConvos.some(c => c.id === receivedMsg.conversationId);
-          
-          if (!convoExists) {
-            fetchConversations(); // A new conversation has started, refresh the list
-            return prevConvos; 
-          }
-
-          const updatedConvos = prevConvos.map(c => {
-              if (c.id === receivedMsg.conversationId) {
-                  return {
-                      ...c,
-                      lastMessageContent: receivedMsg.content,
-                      lastMessageTimestamp: receivedMsg.sentAt,
-                      lastMessageSenderId: receivedMsg.senderId,
-                      unreadMessageCount: isForCurrentConvo ? 0 : (c.unreadMessageCount || 0) + 1,
-                  };
-              }
-              return c;
-          });
-          
-          return updatedConvos.sort((a, b) => 
-            parseISO(b.lastMessageTimestamp || 0) - parseISO(a.lastMessageTimestamp || 0)
-          );
-      });
-    };
-
-    client.connect({}, 
-      () => {
-        console.log('STOMP (Buyer): Connected');
-        client.subscribe('/topic/messages', onMessageReceived);
-      }, 
+    client.connect(headers, 
+      () => console.log('STOMP (Buyer): Connected'), 
       (error) => console.error('STOMP (Buyer): Connection error', error)
     );
 
     return () => {
+      if (subscriptionRef.current) subscriptionRef.current.unsubscribe();
       if (stompClientRef.current?.connected) {
         stompClientRef.current.disconnect(() => console.log('STOMP (Buyer): Disconnected.'));
-        stompClientRef.current = null;
       }
     };
-  }, [currentUser, fetchConversations]);
+  }, [currentUser]);
 
   useEffect(() => {
     const { state } = location;
     if (!isAuthLoading && currentUser && state?.openWithSellerId) {
-      const handleStartConversation = async () => {
+      const handleStart = async () => {
         try {
           toast.loading('Starting conversation...');
           const { data } = await startConversation(currentUser.id, state.openWithSellerId);
           if (state.productContext?.name) setNewMessage(`Regarding: ${state.productContext.name}\n\n`);
-          // Pass the new conversation ID to fetchConversations so it can be selected
           await fetchConversations(data.id); 
           toast.dismiss();
         } catch (error) {
@@ -173,7 +135,7 @@ export default function BuyerMessagesPage() {
           navigate(location.pathname, { replace: true, state: {} });
         }
       };
-      handleStartConversation();
+      handleStart();
     } else if (!isAuthLoading && currentUser) {
       fetchConversations();
     }
@@ -183,23 +145,20 @@ export default function BuyerMessagesPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // --- REFACTORED: Simplified message sending ---
   const handleSendMessage = (e) => {
     e.preventDefault();
     const trimmedMessage = newMessage.trim();
     if (!trimmedMessage || !stompClientRef.current?.connected || !selectedConvoId) return;
 
-    const payload = {
+    stompClientRef.current.send("/app/chat.sendMessage", {}, JSON.stringify({
       conversationId: selectedConvoId,
       senderId: currentUser.id,
       content: trimmedMessage,
-    };
-    stompClientRef.current.send("/app/chat.sendMessage", {}, JSON.stringify(payload));
+    }));
     setNewMessage("");
   };
   
   const selectedConvo = useMemo(() => conversations.find(c => c.id === selectedConvoId), [conversations, selectedConvoId]);
-  
   const otherParticipantName = useMemo(() => {
     if (!selectedConvo || !currentUser) return "Conversation";
     return currentUser.id === selectedConvo.user1Id ? selectedConvo.user2Name : selectedConvo.user1Name;

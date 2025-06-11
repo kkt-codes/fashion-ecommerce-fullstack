@@ -86,6 +86,7 @@ export const removeFavorite = (productId) => apiClient.delete(`/users/me/favorit
 export const checkout = (checkoutData) => apiClient.post('/orders/checkout', checkoutData);
 export const getMyBuyerOrders = (params) => apiClient.get('/orders/user/me', { params });
 export const getMySellerOrders = (params) => apiClient.get('/orders/seller/me', { params });
+export const getMySellerSales = () => apiClient.get('/orders/seller/me/stats');
 export const updateOrderStatus = (orderId, status) => apiClient.patch(`/orders/${orderId}`, { status });
 export const getDeliveryOptions = () => apiClient.get('/deliveries');
 export const createDelivery = (deliveryData) => apiClient.post('/deliveries', deliveryData);
