@@ -139,7 +139,11 @@ export default function SellerProducts() {
           {productsData.content.map((product) => (
             <div key={product.id} className="bg-white rounded-xl shadow-lg overflow-hidden flex flex-col hover:shadow-2xl transition-shadow">
               <Link to={`/products/${product.id}`} className="block group">
-                <img src={product.photoUrl || '/assets/placeholder.png'} alt={product.name} className="w-full h-48 object-cover group-hover:opacity-90" />
+                <img 
+                  src={product.photoUrl && product.photoUrl.startsWith('http') ? product.photoUrl : `http://localhost:8080${product.photoUrl || ''}`}
+                  alt={product.name} 
+                  className="w-full h-48 object-cover group-hover:opacity-90" 
+                />
               </Link>
               <div className="p-5 flex flex-col flex-grow">
                 <h2 className="text-lg font-semibold text-gray-800 truncate mb-1" title={product.name}>{product.name}</h2>

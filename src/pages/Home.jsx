@@ -116,7 +116,7 @@ export default function Home() {
 
       {/* Featured Categories */}
       <section className="py-16 bg-white">
-        <div className="container mx-auto px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12">
             <h2 className="text-4xl font-bold text-gray-800">Shop by Category</h2>
             <p className="mt-3 text-lg text-gray-600">Explore our curated collections.</p>
@@ -136,7 +136,7 @@ export default function Home() {
 
       {/* New Arrivals Section */}
       <section className="py-16 bg-gray-50">
-        <div className="container mx-auto px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12"><h2 className="text-4xl font-bold text-gray-800">New Arrivals</h2><p className="mt-3 text-lg text-gray-600">Check out the freshest styles added to our store.</p></div>
           <ProductShowcase title="New Arrivals" products={newArrivals} isLoading={isLoading} error={error} />
           <div className="text-center mt-12"><Link to="/products?sort=id-desc" className="px-6 py-3 border-2 border-blue-600 text-blue-600 font-semibold rounded-lg hover:bg-blue-600 hover:text-white transition-colors">View All New Products <ArrowRightIcon className="h-5 w-5 inline-block" /></Link></div>
@@ -145,7 +145,7 @@ export default function Home() {
       
       {/* Featured Products Section */}
       <section className="py-16 bg-white">
-        <div className="container mx-auto px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12"><h2 className="text-4xl font-bold text-gray-800">Featured Products</h2><p className="mt-3 text-lg text-gray-600">Handpicked selections with top reviews.</p></div>
           <ProductShowcase title="Featured Products" products={featuredProducts} isLoading={isLoading} error={error} />
            <div className="text-center mt-12"><Link to="/products?sort=averageRating-desc" className="px-8 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 shadow-lg inline-flex items-center gap-2">Explore All Products <ShoppingCartIcon className="h-5 w-5" /></Link></div>
@@ -154,7 +154,7 @@ export default function Home() {
 
       {/* Brand Highlights Section */}
       <section className="py-16 bg-gradient-to-br from-purple-600 to-blue-700 text-white">
-        <div className="container mx-auto px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12"><h2 className="text-4xl font-bold">Why Choose Us?</h2><p className="mt-3 text-lg text-blue-100">Our commitment to quality and service.</p></div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
             {brandHighlights.map(({ icon: Icon, title, description }) => (

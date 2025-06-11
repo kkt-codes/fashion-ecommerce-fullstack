@@ -49,7 +49,7 @@ const AboutPage = () => {
 
       {/* Our Story Section */}
       <section className="py-16 sm:py-20">
-        <div className="container mx-auto px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid md:grid-cols-2 gap-12 items-center">
             <div className="prose prose-lg text-gray-700 max-w-none"> {/* prose classes for nice typography */}
               <h2 className="text-3xl sm:text-4xl font-bold text-gray-800 mb-6 flex items-center">
@@ -79,7 +79,7 @@ const AboutPage = () => {
 
       {/* Our Commitment Section */}
       <section className="py-16 sm:py-20 bg-gray-100">
-        <div className="container mx-auto px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12">
             <h2 className="text-3xl sm:text-4xl font-bold text-gray-800">Our Commitment to You</h2>
             <p className="mt-3 text-lg text-gray-600 max-w-xl mx-auto">

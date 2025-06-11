@@ -97,7 +97,7 @@ export default function ProductCard({ product }) {
     <div className="border border-gray-200 rounded-lg overflow-hidden shadow-md hover:shadow-xl transition-shadow duration-300 flex flex-col bg-white h-full">
       <Link to={`/products/${product.id}`} className="block group relative">
         <img
-          src={product.photoUrl || '/assets/placeholder.png'}
+          src={product.photoUrl && product.photoUrl.startsWith('http') ? product.photoUrl : `http://localhost:8080${product.photoUrl || ''}` || '/assets/placeholder.png'}
           alt={product.name}
           className="w-full h-56 object-cover transition-transform duration-300 group-hover:scale-105"
           onError={(e) => { e.target.onerror = null; e.target.src = '/assets/placeholder.png'; }}

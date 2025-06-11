@@ -93,7 +93,7 @@ const ContactPage = () => {
       </section>
 
       <section className="py-20">
-        <div className="container mx-auto px-6">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid lg:grid-cols-12 gap-12">
             
             <div className="lg:col-span-7 bg-white p-10 rounded-xl shadow-xl">
@@ -134,6 +134,14 @@ const ContactPage = () => {
                   <div className="flex items-start"><MapPinIcon className="h-7 w-7 text-blue-600 mr-4 mt-1" /><div><h3 className="text-lg font-semibold">Our Address</h3><p className="text-gray-600 text-sm">123 E-commerce Avenue, Fashion City, FS 12345</p></div></div>
                   <div className="flex items-start"><EnvelopeIcon className="h-7 w-7 text-blue-600 mr-4 mt-1" /><div><h3 className="text-lg font-semibold">Email Us</h3><a href="mailto:support@fashion.com" className="text-blue-600 hover:underline text-sm">support@fashion.com</a></div></div>
                   <div className="flex items-start"><PhoneIcon className="h-7 w-7 text-blue-600 mr-4 mt-1" /><div><h3 className="text-lg font-semibold">Call Us</h3><a href="tel:+1234567890" className="text-blue-600 hover:underline text-sm">+1 (234) 567-890</a></div></div>
+                </div>
+                <div className="mt-8 pt-8 border-t border-gray-200">
+                  <h3 className="text-lg font-semibold text-gray-800 mb-4">Find Us Here</h3>
+                  <img 
+                      src="/assets/contact-us/map-placeholder.jpg" 
+                      alt="A person cheerfully assisting a customer on the phone" 
+                      className="w-full h-auto object-cover rounded-lg shadow-md"
+                  />
                 </div>
               </div>
             </div>

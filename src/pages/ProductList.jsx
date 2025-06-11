@@ -145,7 +145,7 @@ export default function ProductList() {
   // ... The rest of your JSX for this component remains the same ...
   return (
     <div className="bg-gray-50">
-      <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="text-center mb-8 sm:mb-12">
           <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-gray-800">Our Products</h1>
           <p className="mt-3 text-lg text-gray-600">Browse our extensive collection.</p>

@@ -81,7 +81,16 @@ export default function EditProduct() {
             category: productData.category || "",
             stock: productData.stock !== undefined ? String(productData.stock) : "",
         });
-        setImagePreview(productData.photoUrl || "");
+        const imageUrl = productData.photoUrl || "";
+        // Check if the URL is absolute or relative before setting the preview
+        if (imageUrl) {
+            const fullImageUrl = imageUrl.startsWith('http')
+              ? imageUrl
+              : `http://localhost:8080${imageUrl}`;
+            setImagePreview(fullImageUrl);
+        } else {
+            setImagePreview("");
+        }
         
         if (categoriesRes.data && categoriesRes.data.length > 0) {
             setCategories(categoriesRes.data.sort());

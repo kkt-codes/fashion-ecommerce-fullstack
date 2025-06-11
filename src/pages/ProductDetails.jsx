@@ -5,7 +5,9 @@ import {
     ShoppingCartIcon,
     StarIcon as StarOutlineIcon,
     ExclamationTriangleIcon,
-    ArchiveBoxIcon
+    ArchiveBoxIcon,
+    UserCircleIcon,
+    EnvelopeIcon
 } from "@heroicons/react/24/outline";
 import { HeartIcon as HeartSolidIcon, StarIcon as StarSolidIcon } from "@heroicons/react/24/solid";
 import toast from 'react-hot-toast';
@@ -42,7 +44,7 @@ export default function ProductDetails() {
     }
     setIsLoading(true);
     setError(null);
-    setHasPurchased(false); // Reset on each fetch
+    setHasPurchased(false);
     try {
       const [productRes, reviewsRes] = await Promise.all([
         getProductById(productId),
@@ -51,25 +53,24 @@ export default function ProductDetails() {
       setProduct(productRes.data);
       setReviews(reviewsRes.data || []);
 
-      // After fetching product, check if the authenticated user has purchased it
       if (isAuthenticated && userRole === 'BUYER') {
         try {
           const purchaseStatusRes = await checkPurchaseStatus(productId);
           setHasPurchased(purchaseStatusRes.data.hasPurchased);
         } catch (purchaseError) {
           console.error("Could not verify purchase status:", purchaseError);
-          setHasPurchased(false); // Default to false on error
+          setHasPurchased(false);
         }
       }
 
     } catch (err) {
       console.error("ProductDetails: Error fetching data:", err);
-      setError(err.response?.data?.message || "Failed to load product details.");
-      toast.error(err.response?.data?.message || "Could not load product details.");
+      const errorMsg = err.response?.data?.message || "Failed to load product details.";
+      setError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setIsLoading(false);
     }
-    // Add isAuthenticated and userRole to dependency array to refetch purchase status on login/logout
   }, [productId, isAuthenticated, userRole]);
 
   useEffect(() => {
@@ -91,7 +92,7 @@ export default function ProductDetails() {
         toast.error("Only buyers can add items to the cart.");
         return;
     }
-    addToCart(product, quantity); // Corrected this from a previous step to pass the full object
+    addToCart(product, quantity);
   };
 
   const handleReviewSubmit = async (reviewData) => {
@@ -153,7 +154,11 @@ export default function ProductDetails() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 items-start mb-12">
           {/* Image Column */}
           <div className="shadow-xl rounded-lg overflow-hidden bg-white relative">
-            <img src={product.photoUrl || '/assets/placeholder.png'} alt={product.name} className="w-full h-auto md:min-h-[450px] max-h-[650px] object-cover" />
+            <img 
+              src={product.photoUrl && product.photoUrl.startsWith('http') ? product.photoUrl : `http://localhost:8080${product.photoUrl || ''}`}
+              alt={product.name} 
+              className="w-full h-auto md:min-h-[450px] max-h-[650px] object-cover" 
+            />
             {isAuthenticated && userRole === 'BUYER' && (
               <button onClick={() => toggleFavorite(product)} disabled={isFavoritesLoading} className="absolute top-4 right-4 p-2.5 bg-white/80 backdrop-blur-sm rounded-full shadow-lg transition-all focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-50">
                 {isCurrentlyFavorite ? <HeartSolidIcon className="h-7 w-7 text-red-500" /> : <HeartOutlineIcon className="h-7 w-7 text-gray-600 hover:text-red-500" />}
@@ -183,6 +188,19 @@ export default function ProductDetails() {
               <label htmlFor="quantity" className="font-semibold text-gray-700">Quantity:</label>
               <input type="number" id="quantity" value={quantity} onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value, 10)))} min="1" className="border border-gray-300 rounded-md w-20 p-2 text-center focus:ring-2 focus:ring-blue-500" />
             </div>
+            
+            {/* --- Display Seller Info --- */}
+            <div className="mt-4 pt-4 border-t border-gray-200 space-y-3">
+                <h3 className="text-lg font-semibold text-gray-800">Sold By</h3>
+                <div className="flex items-center gap-3">
+                    <UserCircleIcon className="h-6 w-6 text-gray-500"/>
+                    <span className="text-gray-700">{product.sellerName}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                    <EnvelopeIcon className="h-6 w-6 text-gray-500"/>
+                    <span className="text-gray-700">{product.sellerEmail}</span>
+                </div>
+            </div>
 
             <div className="mt-4 flex flex-col gap-4">
               {userRole !== 'SELLER' && (
@@ -207,10 +225,8 @@ export default function ProductDetails() {
             <p className="text-gray-600 py-4">No reviews yet for this product. Be the first to write one!</p>
           )}
 
-          {/* --- Conditional Rendering Logic for Review Form --- */}
           {(() => {
             if (isAuthenticated && userRole === 'BUYER') {
-              // If logged-in buyer has purchased the item, show the form
               if (hasPurchased) {
                 return (
                   <div className="mt-10 pt-6 border-t border-gray-200">
@@ -218,21 +234,18 @@ export default function ProductDetails() {
                   </div>
                 );
               }
-              // If logged-in buyer has NOT purchased, show a message
               return (
                 <p className="mt-8 text-sm text-gray-600 py-4">
                   You must purchase this item to write a review.
                 </p>
               );
             } else if (userRole !== 'SELLER') {
-              // If user is a guest or any role other than SELLER, show sign-in prompt
               return (
                 <p className="mt-8 text-sm text-gray-600 py-4">
                   <button onClick={() => openModal('signin')} className="text-blue-600 hover:underline font-medium">Sign in</button> as a buyer to write a review.
                 </p>
               );
             }
-            // Return null to show nothing for Sellers or other roles
             return null;
           })()}
         </div>

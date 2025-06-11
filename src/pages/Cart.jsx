@@ -171,7 +171,12 @@ export default function CartPage() {
               <ul className="divide-y divide-gray-200">
                 {cartItems.map((item) => (
                   <li key={item.id || item.productId} className="flex items-center p-6 gap-4">
-                    <img src={item.photoUrl || '/assets/placeholder.png'} alt={item.productName} className="w-24 h-24 object-cover rounded-lg border" />
+                    <img 
+                      src={item.photoUrl && item.photoUrl.startsWith('http') ? item.photoUrl : `http://localhost:8080${item.photoUrl || ''}`}
+                      //src={item.photoUrl || '/assets/placeholder.png'} 
+                      alt={item.productName} 
+                      className="w-24 h-24 object-cover rounded-lg border" 
+                    />
                     <div className="flex-grow">
                       <Link to={`/products/${item.productId}`} className="hover:text-blue-600">
                         <h3 className="text-lg font-semibold text-gray-800">{item.productName}</h3>
