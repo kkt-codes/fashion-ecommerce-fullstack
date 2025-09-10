@@ -44,17 +44,14 @@ export default function CartPage() {
   const [isOptionsLoading, setIsOptionsLoading] = useState(true);
   const [isProcessingCheckout, setIsProcessingCheckout] = useState(false);
 
-  // --- START OF FIX ---
   // Determine if the checkout button should be disabled
   const isCheckoutDisabled = 
     isCartLoading || 
     isProcessingCheckout || 
     isOptionsLoading || 
     cartItems.length === 0 || 
-    !isAuthenticated || // Must be authenticated
+    !isAuthenticated ||
     !selectedDeliveryId; // Must have a delivery option selected
-  // --- END OF FIX ---
-
 
   useEffect(() => {
     const fetchDeliveryOptions = async () => {
@@ -82,7 +79,6 @@ export default function CartPage() {
   };
 
   const handlePlaceOrder = async () => {
-    // --- START OF FIX: More robust checks ---
     if (!isAuthenticated || !currentUser?.id) {
       toast.error("Please log in to place an order.");
       openModal('signin');
@@ -97,7 +93,6 @@ export default function CartPage() {
         toast.error("Please select a delivery option.");
         return;
     }
-    // --- END OF FIX ---
 
     setIsProcessingCheckout(true);
     const toastId = toast.loading("Creating your order...");
@@ -108,9 +103,7 @@ export default function CartPage() {
         deliveryId: selectedDeliveryId,
       };
 
-      // --- START OF FIX: Add a log to see the exact data being sent ---
       console.log("Attempting to checkout with payload:", checkoutPayload);
-      // --- END OF FIX ---
       
       const { data: createdOrders } = await checkout(checkoutPayload);
       
@@ -231,11 +224,9 @@ export default function CartPage() {
               </div>
 
               <div className="pt-2">
-                {/* --- START OF FIX: Apply the disabled logic to the button --- */}
                 <button onClick={handlePlaceOrder} disabled={isCheckoutDisabled} className="w-full py-3 rounded-lg text-white font-semibold bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors shadow-lg hover:shadow-xl transform hover:scale-105">
                   {isProcessingCheckout ? 'Processing...' : 'Proceed to Checkout'}
                 </button>
-                {/* --- END OF FIX --- */}
               </div>
             </div>
           </div>
