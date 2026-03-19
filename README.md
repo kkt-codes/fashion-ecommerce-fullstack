@@ -9,7 +9,7 @@ This project is a responsive and interactive full stack web app for a clothing e
 * **Product Catalog:** Browse products with dynamic filtering (category, price, rating), sorting, and pagination.
 * **Product Details:** View individual product information and reviews.
 * **Shopping Cart:** Add/remove items, update quantities, and select delivery options with associated fees.
-* **Checkout:** Simulate order placement with orders saved to local storage.
+* **Checkout:** Place real orders through the backend API integration.
 * **User Roles & Authentication:**
     * Separate flows for "Buyer" and "Seller" roles using authentication.
     * Buyer Dashboard (profile, orders, messages, favorites).
@@ -64,15 +64,16 @@ This project is a responsive and interactive full stack web app for a clothing e
 
 ## Project Structure Highlights
 
-* **/public/data/products.json**: Main source for product listings.
 * **/src/components**: Reusable UI components.
 * **/src/context**: Global state management (Auth, Cart, Favorites).
-* **/src/data**: Static mock data for users and messages.
-* **/src/hooks**: Custom React hooks (e.g., `useFetchCached`).
 * **/src/pages**: Top-level page components.
+* **/src/services/api.js**: Axios instance and API call functions for backend integration.
+* **/src/routes**: Application routing configuration.
 * **/src/utils/dto.js**: Defines data structures (conceptual).
 
-## Notes on Mock Data & Persistence
+## Backend Integration & State Persistence
 
-* User authentication, cart data, orders, and messages are currently mocked and primarily use `localStorage` for persistence during a browser session.
-* Product data is fetched from `/public/data/products.json` and uses a client-side caching mechanism (`useFetchCached.js`).
+* This frontend connects to a real Spring Boot backend using Axios (`/src/services/api.js`).
+* **Backend Repository:** <https://github.com/kidus-yoseph-t/fashion.git>
+* User authentication uses JSON Web Tokens (JWT). The token and basic user data are stored in `localStorage` to persist sessions.
+* Unauthenticated guests can use a temporary shopping cart which is stored in `localStorage` and merged with their account upon login or registration.
